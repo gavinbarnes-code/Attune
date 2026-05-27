@@ -14,9 +14,10 @@
     #song-title{font-size:19px;font-weight:500;margin-bottom:4px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
     #song-sub{font-size:13px;opacity:.6;margin-bottom:1.5rem;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
     .scrubber-wrap{margin-bottom:1.5rem}
-    #scrubber{height:4px;background:rgba(255,255,255,0.15);border-radius:2px;cursor:pointer;position:relative;margin-bottom:8px}
+    #scrubber{height:18px;display:flex;align-items:center;cursor:pointer;position:relative;margin-bottom:4px}
+    #scrubber-track{position:absolute;left:0;right:0;height:4px;background:rgba(255,255,255,0.15);border-radius:2px}
     #scrubber-fill{height:100%;background:#1DB954;border-radius:2px;width:0%;pointer-events:none}
-    #scrubber-thumb{position:absolute;top:50%;transform:translate(-50%,-50%);width:12px;height:12px;border-radius:50%;background:#fff;pointer-events:none;left:0%}
+    #scrubber-thumb{position:absolute;top:50%;transform:translate(-50%,-50%);width:14px;height:14px;border-radius:50%;background:#fff;box-shadow:0 0 4px rgba(0,0,0,.4);pointer-events:none;left:0%}
     .scrubber-times{display:flex;justify-content:space-between;font-size:12px;opacity:.5}
     .controls{display:flex;align-items:center;justify-content:center;gap:32px}
     .ctrl-btn{background:none;border:none;cursor:pointer;color:#fff;font-size:28px;opacity:.85;padding:8px;line-height:1}
@@ -36,15 +37,13 @@
     .spotify-btn:hover{background:#1ed760}
     .note{font-size:12px;opacity:.4;margin-top:16px}
     .footer{margin-top:12px;font-size:11px;opacity:.3;text-align:center}
-    #overlay{position:fixed;inset:0;background:rgba(0,0,0,.7);display:flex;align-items:center;justify-content:center;z-index:100}
+    #overlay{position:fixed;inset:0;background:rgba(0,0,0,.75);display:flex;align-items:center;justify-content:center;z-index:100}
     #overlay-box{background:#1a1a2e;border-radius:20px;padding:2rem;text-align:center;max-width:300px}
     #overlay-box p{font-size:14px;opacity:.7;margin-bottom:1.5rem;line-height:1.6}
     #overlay-box button{background:#1DB954;border:none;color:#000;padding:12px 28px;border-radius:40px;font-size:15px;font-weight:500;cursor:pointer;width:100%}
   </style>
 </head>
 <body>
-
-<!-- Static player shell — only dynamic parts update -->
 <div id="app">
   <div id="screen-login" class="center" style="display:none">
     <div style="font-size:48px">🎵</div>
@@ -53,24 +52,23 @@
     <button class="spotify-btn" id="btn-login">Connect with Spotify</button>
     <p class="note">Requires Spotify Premium for in-browser playback</p>
   </div>
-
   <div id="screen-loading" class="center" style="display:none">
     <p style="opacity:.6">Loading your music...</p>
   </div>
-
   <div id="screen-error" class="center" style="display:none">
     <div style="font-size:36px;margin-bottom:12px">⚠️</div>
-    <p id="error-msg"></p>
+    <p id="error-msg">Something went wrong.</p>
     <button class="spotify-btn" id="btn-reconnect" style="margin-top:1rem">Reconnect</button>
   </div>
-
   <div id="player-card">
     <div id="album-art">🎵</div>
     <div id="song-title">—</div>
     <div id="song-sub">—</div>
     <div class="scrubber-wrap">
       <div id="scrubber">
-        <div id="scrubber-fill"></div>
+        <div id="scrubber-track">
+          <div id="scrubber-fill"></div>
+        </div>
         <div id="scrubber-thumb"></div>
       </div>
       <div class="scrubber-times">
@@ -79,7 +77,7 @@
       </div>
     </div>
     <div class="controls">
-      <button class="ctrl-btn" id="btn-rev" aria-label="Rewind or previous">⏮</button>
+      <button class="ctrl-btn" id="btn-rev" aria-label="Previous or rewind">⏮</button>
       <button id="play-btn" aria-label="Play">▶</button>
       <button class="ctrl-btn" id="btn-fwd" aria-label="Skip">⏭</button>
     </div>
@@ -91,7 +89,6 @@
   <div class="footer" id="footer" style="display:none">Attune · powered by Spotify</div>
 </div>
 
-<!-- Tap-to-start overlay (required for autoplay policy) -->
 <div id="overlay" style="display:none">
   <div id="overlay-box">
     <div style="font-size:40px;margin-bottom:1rem">🎵</div>
@@ -148,33 +145,39 @@ async function getToken(){
 }
 
 // ── State ─────────────────────────────────────────────────
-let sdkPlayer=null, deviceId=null, pbState=null;
-let pos=0, queue=[], qi=0;
-let weights={energy:{},valence:{},tempo:{},decade:{}};
-let playedLog={}, skipStreak=0, feats={}, topArtists=[];
-let scrubHist=[], pauseAt=null, advancing=false, lastUri=null;
-let currentArt="", currentTrackId="";
+let sdkPlayer=null, deviceId=null, pbState=null, pos=0;
 
-// ── DOM refs ──────────────────────────────────────────────
-const screens={
-  login:document.getElementById("screen-login"),
-  loading:document.getElementById("screen-loading"),
-  error:document.getElementById("screen-error"),
-  player:document.getElementById("player-card"),
-};
-const elArt      = document.getElementById("album-art");
-const elTitle    = document.getElementById("song-title");
-const elSub      = document.getElementById("song-sub");
-const elFill     = document.getElementById("scrubber-fill");
-const elThumb    = document.getElementById("scrubber-thumb");
-const elTPos     = document.getElementById("t-pos");
-const elTDur     = document.getElementById("t-dur");
-const elPlayBtn  = document.getElementById("play-btn");
-const elTasteSec = document.getElementById("taste-section");
-const elTasteTags= document.getElementById("taste-tags");
-const elFooter   = document.getElementById("footer");
-const elOverlay  = document.getElementById("overlay");
-const elErrMsg   = document.getElementById("error-msg");
+// Queue is a fixed ordered list. qi is the cursor.
+// New songs are always appended to the END — never inserted mid-queue.
+// Going back/forward just moves qi. The history is always preserved.
+let queue=[];   // full ordered history + future songs
+let qi=0;       // current index into queue
+
+let weights={energy:{},valence:{},tempo:{},decade:{}};
+let playedLog={};   // trackId -> timestamp last played
+let skipStreak=0;
+let feats={};       // trackId -> audio features
+let topArtists=[];
+let scrubHist=[], pauseAt=null, advancing=false, lastUri=null;
+let currentTrackId="", currentArt="";
+let isScrubbing=false;  // true while user is dragging scrubber
+
+// ── DOM ───────────────────────────────────────────────────
+const screens={login:document.getElementById("screen-login"),loading:document.getElementById("screen-loading"),error:document.getElementById("screen-error"),player:document.getElementById("player-card")};
+const elArt=document.getElementById("album-art");
+const elTitle=document.getElementById("song-title");
+const elSub=document.getElementById("song-sub");
+const elFill=document.getElementById("scrubber-fill");
+const elThumb=document.getElementById("scrubber-thumb");
+const elTPos=document.getElementById("t-pos");
+const elTDur=document.getElementById("t-dur");
+const elPlayBtn=document.getElementById("play-btn");
+const elTasteSec=document.getElementById("taste-section");
+const elTasteTags=document.getElementById("taste-tags");
+const elFooter=document.getElementById("footer");
+const elOverlay=document.getElementById("overlay");
+const elErrMsg=document.getElementById("error-msg");
+const elScrubber=document.getElementById("scrubber");
 
 function showScreen(name,msg){
   Object.values(screens).forEach(s=>s.style.display="none");
@@ -184,30 +187,31 @@ function showScreen(name,msg){
   else if(screens[name])screens[name].style.display="block";
 }
 
-// ── Targeted DOM updates (no full re-render) ──────────────
+// ── Targeted updates ──────────────────────────────────────
+function fmt(ms){
+  if(!ms&&ms!==0)return"0:00";
+  const s=Math.floor(ms/1000);
+  return`${Math.floor(s/60)}:${(s%60).toString().padStart(2,"0")}`;
+}
 function updateProgress(){
+  if(isScrubbing)return; // don't override while user is dragging
   const dur=pbState?.duration||0;
   const pct=dur?Math.min(100,(pos/dur)*100):0;
-  elFill.style.width=pct.toFixed(1)+"%";
-  elThumb.style.left=pct.toFixed(1)+"%";
+  elFill.style.width=pct.toFixed(2)+"%";
+  elThumb.style.left=pct.toFixed(2)+"%";
   elTPos.textContent=fmt(pos);
   elTDur.textContent=fmt(dur);
 }
 function updatePlayBtn(){
   const paused=pbState?.paused??true;
   elPlayBtn.textContent=paused?"▶":"⏸";
-  elPlayBtn.setAttribute("aria-label",paused?"Play":"Pause");
 }
 function updateTrackInfo(){
   const cur=queue[qi];if(!cur)return;
-  // Only swap album art DOM if track actually changed
   if(cur.id!==currentTrackId){
     currentTrackId=cur.id;
     const art=cur.album?.images?.[0]?.url||"";
-    if(art!==currentArt){
-      currentArt=art;
-      elArt.innerHTML=art?`<img src="${art}" alt="album art" loading="lazy"/>`:"🎵";
-    }
+    if(art!==currentArt){currentArt=art;elArt.innerHTML=art?`<img src="${art}" alt="album art" loading="lazy"/>`:"🎵";}
     elTitle.textContent=cur.name||"—";
     elTitle.title=cur.name||"";
     elSub.textContent=(cur.artists?.map(a=>a.name).join(", ")||"Unknown")+(cur.album?.name?" · "+cur.album.name:"");
@@ -218,24 +222,13 @@ function updateTaste(){
   const topV=Object.entries(weights.valence).sort((a,b)=>b[1]-a[1])[0]?.[0];
   if(!topE&&!topV){elTasteSec.style.display="none";return;}
   elTasteSec.style.display="block";
-  elTasteTags.innerHTML=
-    (topE?`<span class="tag green">${topE} energy</span>`:"")+
+  elTasteTags.innerHTML=(topE?`<span class="tag green">${topE} energy</span>`:"")+
     (topV?`<span class="tag">${topV}</span>`:"")+
     (skipStreak>=3?`<span class="tag orange">switching it up</span>`:"");
 }
-function draw(){
-  updateTrackInfo();
-  updateProgress();
-  updatePlayBtn();
-  updateTaste();
-}
+function draw(){updateTrackInfo();updateProgress();updatePlayBtn();updateTaste();}
 
 // ── Helpers ───────────────────────────────────────────────
-function fmt(ms){
-  if(!ms&&ms!==0)return"0:00";
-  const s=Math.floor(ms/1000);
-  return`${Math.floor(s/60)}:${(s%60).toString().padStart(2,"0")}`;
-}
 function adjW(a,delta){for(const[k,v]of Object.entries(a))if(v!=null)weights[k][v]=(weights[k][v]||0)+delta;}
 function tAttrs(track){
   const yr=track?.album?.release_date?.slice(0,4);
@@ -250,6 +243,16 @@ function scoreTrack(t){
   return s+Math.random()*1.5;
 }
 function notPlayed(id){const lp=playedLog[id];return!lp||(Date.now()-lp)>86400000;}
+function posFromEvent(e){
+  const rect=elScrubber.getBoundingClientRect();
+  const clientX=e.touches?e.touches[0].clientX:e.clientX;
+  return Math.max(0,Math.min(1,(clientX-rect.left)/rect.width));
+}
+function setPct(pct){
+  elFill.style.width=(pct*100).toFixed(2)+"%";
+  elThumb.style.left=(pct*100).toFixed(2)+"%";
+  elTPos.textContent=fmt(pct*(pbState?.duration||0));
+}
 
 // ── API ───────────────────────────────────────────────────
 async function api(url,opts={}){
@@ -266,7 +269,7 @@ async function api(url,opts={}){
 async function safeFeats(ids){
   if(!ids?.length)return;
   try{const r=await api(`/audio-features?ids=${ids.slice(0,100).join(",")}`);r?.audio_features?.forEach(f=>{if(f)feats[f.id]=f;});}
-  catch(e){/* may not be available for new apps */}
+  catch(e){}
 }
 async function search(q,limit=6){
   try{const r=await api(`/search?q=${encodeURIComponent(q)}&type=track&limit=${limit}&market=US`);return r?.tracks?.items||[];}catch(e){return[];}
@@ -275,10 +278,8 @@ async function artistTopTracks(id){
   try{const r=await api(`/artists/${id}/top-tracks?market=US`);return r?.tracks||[];}catch(e){return[];}
 }
 
-// ── Discovery ─────────────────────────────────────────────
-async function nextTracks(cur,skips){
-  const now=Date.now();
-  if(cur?.id)playedLog[cur.id]=now;
+// ── Discovery — appends to end of queue only ──────────────
+async function appendNextTracks(cur,skips){
   let pool=[];
   if(skips>=3){
     const topE=Object.entries(weights.energy).sort((a,b)=>b[1]-a[1])[0]?.[0];
@@ -287,14 +288,17 @@ async function nextTracks(cur,skips){
     skipStreak=0;
   }else{
     const ids=[...(cur?.artists?.[0]?.id?[cur.artists[0].id]:[]),...topArtists].filter(Boolean).slice(0,4);
-    for(const id of ids){pool.push(...await artistTopTracks(id));}
+    for(const id of ids)pool.push(...await artistTopTracks(id));
     if(pool.length<4&&cur?.artists?.[0]?.name)pool.push(...await search(cur.artists[0].name+" similar",6));
   }
-  pool=pool.filter(t=>t?.id&&t?.uri&&notPlayed(t.id)&&t.id!==cur?.id);
+  // Filter: not already in queue anywhere, not played in 24h
+  const inQueue=new Set(queue.map(t=>t.id));
+  pool=pool.filter(t=>t?.id&&t?.uri&&notPlayed(t.id)&&!inQueue.has(t.id));
   pool=[...new Map(pool.map(t=>[t.id,t])).values()];
   await safeFeats(pool.map(t=>t.id));
   pool.sort((a,b)=>scoreTrack(b)-scoreTrack(a));
-  return pool.slice(0,3);
+  // Append top 3 to end of queue
+  queue.push(...pool.slice(0,3));
 }
 
 // ── Playback ──────────────────────────────────────────────
@@ -303,68 +307,112 @@ async function playTrack(track){
   try{
     await api(`/me/player/play?device_id=${deviceId}`,{method:"PUT",body:JSON.stringify({uris:[track.uri]})});
     lastUri=track.uri;
+    pos=0;
   }catch(e){console.warn("play failed:",e);}
 }
+
+function recordPlay(track,listenedMs){
+  if(!track)return;
+  const dur=track.duration_ms||pbState?.duration||1;
+  const pct=listenedMs/dur;
+  playedLog[track.id]=Date.now();
+  if(pct>=0.75)adjW(tAttrs(track),2);
+  else if(pct>=0.5)adjW(tAttrs(track),0.5);
+  else adjW(tAttrs(track),-0.5);
+}
+
 async function songEnded(){
   if(advancing)return;advancing=true;
   try{
-    adjW(tAttrs(queue[qi]),2);skipStreak=0;
-    const next=await nextTracks(queue[qi],0);
-    if(next.length)queue.splice(qi+1,0,...next);
+    recordPlay(queue[qi],pbState?.duration||0); // full listen
+    skipStreak=0;
+    // If we're at the end of the queue, append new tracks
+    if(qi>=queue.length-2)await appendNextTracks(queue[qi],0);
     qi=Math.min(qi+1,queue.length-1);
     await playTrack(queue[qi]);draw();
   }finally{advancing=false;}
 }
+
 async function fwd(){
   if(advancing)return;advancing=true;
   try{
-    const cur=queue[qi],pct=pos/(pbState?.duration||1);
-    adjW(tAttrs(cur),pct<0.5?-1.5:pct<0.75?-0.5:0.5);
+    recordPlay(queue[qi],pos); // partial listen signal
     skipStreak++;
-    const next=await nextTracks(cur,skipStreak);
-    if(next.length)queue.splice(qi+1,0,...next);
+    // If moving into uncharted territory, append new tracks first
+    if(qi>=queue.length-2)await appendNextTracks(queue[qi],skipStreak);
     qi=Math.min(qi+1,queue.length-1);
     scrubHist=[];
     await playTrack(queue[qi]);draw();
   }finally{advancing=false;}
 }
+
 async function rev(){
-  const cur=queue[qi];
-  if(pos<3000){
-    adjW(tAttrs(cur),2);qi=Math.max(0,qi-1);
-    await playTrack(queue[qi]);
-  }else{
-    adjW(tAttrs(cur),1.5);
-    try{await api("/me/player/seek?position_ms=0",{method:"PUT"});}catch(e){}
-  }
-  draw();
+  if(advancing)return;advancing=true;
+  try{
+    if(pos<3000){
+      // Go to previous song in queue — qi simply decrements, history preserved
+      adjW(tAttrs(queue[qi]),1); // mild positive for wanting prev
+      if(qi>0)qi--;
+      await playTrack(queue[qi]);
+    }else{
+      // Rewind current song to start
+      adjW(tAttrs(queue[qi]),1.5);
+      try{await api("/me/player/seek?position_ms=0",{method:"PUT"});}catch(e){}
+      pos=0;
+    }
+    draw();
+  }finally{advancing=false;}
 }
+
 async function togglePlay(){
   if(!sdkPlayer)return;
   try{
-    // Use SDK toggle — works reliably with browser autoplay policy
     await sdkPlayer.togglePlay();
-    // Sync state after short delay
     setTimeout(async()=>{
       const s=await sdkPlayer.getCurrentState();
       if(s){pbState=s;pos=s.position;updatePlayBtn();}
-    },200);
-  }catch(e){console.warn("togglePlay error:",e);}
+    },150);
+  }catch(e){console.warn("togglePlay:",e);}
 }
-function scrub(e){
-  const rect=e.currentTarget.getBoundingClientRect();
-  const ratio=Math.max(0,Math.min(1,(e.clientX-rect.left)/rect.width));
-  const dur=pbState?.duration||1;
-  const newPos=ratio*dur,oldPos=pos,delta=newPos-oldPos;
-  const cur=queue[qi],now=Date.now();
-  scrubHist=[...scrubHist.filter(x=>now-x.t<5000),{from:oldPos,to:newPos,t:now}];
-  if(scrubHist.filter(x=>Math.abs(x.from-x.to)<dur*0.2).length>=3)adjW(tAttrs(cur),2);
-  if(newPos<2000&&oldPos>5000)adjW(tAttrs(cur),2);
-  else if(delta<0)adjW(tAttrs(cur),0.5);
-  else if(delta>dur*0.4)adjW(tAttrs(cur),-1);
-  pos=newPos;
-  updateProgress();
-  api(`/me/player/seek?position_ms=${Math.floor(newPos)}`,{method:"PUT"}).catch(()=>{});
+
+// ── Scrubber — mouse + touch drag ────────────────────────
+function onScrubStart(e){
+  e.preventDefault();
+  isScrubbing=true;
+  const ratio=posFromEvent(e);
+  setPct(ratio);
+  function onMove(ev){
+    ev.preventDefault();
+    const r=posFromEvent(ev);
+    setPct(r);
+  }
+  function onEnd(ev){
+    ev.preventDefault();
+    const r=posFromEvent(ev.changedTouches?ev:ev);
+    const dur=pbState?.duration||0;
+    const newPos=r*dur;
+    const oldPos=pos;
+    const delta=newPos-oldPos;
+    const cur=queue[qi];
+    const now=Date.now();
+
+    // Scrub signals
+    scrubHist=[...scrubHist.filter(x=>now-x.t<5000),{from:oldPos,to:newPos,t:now}];
+    if(scrubHist.filter(x=>Math.abs(x.from-x.to)<dur*0.2).length>=3)adjW(tAttrs(cur),2);
+    if(newPos<2000&&oldPos>5000)adjW(tAttrs(cur),2);
+    else if(delta<0)adjW(tAttrs(cur),0.5);
+    else if(delta>dur*0.4)adjW(tAttrs(cur),-1);
+
+    pos=newPos;
+    isScrubbing=false;
+    setPct(r);
+    api(`/me/player/seek?position_ms=${Math.floor(newPos)}`,{method:"PUT"}).catch(()=>{});
+    updateTaste();
+  }
+  document.addEventListener("mousemove",onMove,{passive:false});
+  document.addEventListener("touchmove",onMove,{passive:false});
+  document.addEventListener("mouseup",function up(ev){onEnd(ev);document.removeEventListener("mousemove",onMove);document.removeEventListener("mouseup",up);},{once:true});
+  document.addEventListener("touchend",function up(ev){onEnd(ev);document.removeEventListener("touchmove",onMove);document.removeEventListener("touchend",up);},{once:true,passive:false});
 }
 
 // ── Seed load ─────────────────────────────────────────────
@@ -374,16 +422,17 @@ async function loadSeeds(){
     let tracks=[];
     try{const r=await api("/me/top/tracks?limit=20&time_range=medium_term");tracks=r?.items||[];}catch(e){}
     try{const r=await api("/me/top/artists?limit=10&time_range=medium_term");topArtists=(r?.items||[]).map(a=>a.id);}catch(e){}
-    if(tracks.length<5){try{const r=await api("/me/tracks?limit=20&market=US");tracks=[...tracks,...(r?.items||[]).map(i=>i.track).filter(Boolean)];}catch(e){}}
+    if(tracks.length<5){
+      try{const r=await api("/me/tracks?limit=20&market=US");tracks=[...tracks,...(r?.items||[]).map(i=>i.track).filter(Boolean)];}catch(e){}
+    }
     if(tracks.length<3)tracks=[...tracks,...await search("top hits",10)];
     tracks=tracks.filter(t=>t?.id&&t?.uri);
     if(!tracks.length)throw new Error("No playable tracks found. Make sure your Spotify account has some listening history.");
     await safeFeats(tracks.map(t=>t.id));
+    // Build initial ordered queue — this order is preserved forever
     queue=[...new Map(tracks.map(t=>[t.id,t])).values()].slice(0,20);
     qi=0;lastUri=queue[0]?.uri;
-    showScreen("player");
-    draw();
-    // Show tap-to-start overlay (browser autoplay policy requires user gesture)
+    showScreen("player");draw();
     elOverlay.style.display="flex";
   }catch(e){showScreen("error",e.message);}
 }
@@ -399,7 +448,8 @@ function initSDK(){
     sdkPlayer.addListener("ready",({device_id})=>{deviceId=device_id;loadSeeds();});
     sdkPlayer.addListener("not_ready",()=>{deviceId=null;});
     sdkPlayer.addListener("player_state_changed",s=>{
-      if(!s)return;
+      if(!s||isScrubbing)return;
+      // Detect natural end: paused at 0, previous tracks contains our last uri
       const prev=s.track_window?.previous_tracks||[];
       if(!advancing&&s.paused&&s.position===0&&prev.some(t=>t.uri===lastUri)&&s.track_window?.current_track?.uri!==lastUri){
         songEnded();return;
@@ -413,24 +463,27 @@ function initSDK(){
     sdkPlayer.connect();
 
     setInterval(async()=>{
-      if(!sdkPlayer||elOverlay.style.display!=="none")return;
-      try{const s=await sdkPlayer.getCurrentState();if(s){pbState=s;pos=s.position;updateProgress();updatePlayBtn();}}
-      catch(e){}
+      if(!sdkPlayer||elOverlay.style.display!=="none"||isScrubbing)return;
+      try{
+        const s=await sdkPlayer.getCurrentState();
+        if(s){pbState=s;pos=s.position;updateProgress();updatePlayBtn();}
+      }catch(e){}
     },500);
   };
   const s=document.createElement("script");s.src="https://sdk.scdn.co/spotify-player.js";s.async=true;document.body.appendChild(s);
 }
 
-// ── Event listeners (persistent — never re-attached) ──────
+// ── Event listeners ───────────────────────────────────────
 document.getElementById("btn-login").addEventListener("click",doLogin);
 document.getElementById("btn-reconnect").addEventListener("click",doLogin);
 document.getElementById("btn-rev").addEventListener("click",rev);
 document.getElementById("btn-fwd").addEventListener("click",fwd);
 document.getElementById("play-btn").addEventListener("click",togglePlay);
-document.getElementById("scrubber").addEventListener("click",scrub);
+// Scrubber: support both click and drag on mouse + touch
+elScrubber.addEventListener("mousedown",onScrubStart);
+elScrubber.addEventListener("touchstart",onScrubStart,{passive:false});
 document.getElementById("btn-start").addEventListener("click",async()=>{
   elOverlay.style.display="none";
-  // First play triggered by user gesture — satisfies browser autoplay policy
   await playTrack(queue[qi]);
 });
 

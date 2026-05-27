@@ -8,24 +8,24 @@
     *,*::before,*::after{box-sizing:border-box;margin:0;padding:0}
     body{font-family:-apple-system,BlinkMacSystemFont,"Segoe UI",sans-serif;background:linear-gradient(135deg,#0d0d1a 0%,#1a0d2e 100%);min-height:100vh;display:flex;flex-direction:column;align-items:center;justify-content:center;padding:2rem 1rem;color:#fff}
     #app{width:100%;max-width:380px}
-    .card{background:rgba(255,255,255,0.06);border-radius:24px;border:0.5px solid rgba(255,255,255,0.12);padding:2rem}
-    .album-art{width:100%;aspect-ratio:1;border-radius:16px;margin-bottom:1.5rem;overflow:hidden;background:#1a1a2e;display:flex;align-items:center;justify-content:center;font-size:64px}
-    .album-art img{width:100%;height:100%;object-fit:cover}
-    .song-title{font-size:19px;font-weight:500;margin-bottom:4px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
-    .song-sub{font-size:13px;opacity:.6;margin-bottom:1.5rem;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+    #player-card{background:rgba(255,255,255,0.06);border-radius:24px;border:0.5px solid rgba(255,255,255,0.12);padding:2rem;display:none}
+    #album-art{width:100%;aspect-ratio:1;border-radius:16px;margin-bottom:1.5rem;overflow:hidden;background:#1a1a2e;display:flex;align-items:center;justify-content:center;font-size:64px}
+    #album-art img{width:100%;height:100%;object-fit:cover}
+    #song-title{font-size:19px;font-weight:500;margin-bottom:4px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+    #song-sub{font-size:13px;opacity:.6;margin-bottom:1.5rem;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
     .scrubber-wrap{margin-bottom:1.5rem}
-    .scrubber-track{height:4px;background:rgba(255,255,255,0.15);border-radius:2px;cursor:pointer;position:relative;margin-bottom:8px}
-    .scrubber-fill{height:100%;background:#1DB954;border-radius:2px;pointer-events:none}
-    .scrubber-thumb{position:absolute;top:50%;transform:translate(-50%,-50%);width:12px;height:12px;border-radius:50%;background:#fff;pointer-events:none}
+    #scrubber{height:4px;background:rgba(255,255,255,0.15);border-radius:2px;cursor:pointer;position:relative;margin-bottom:8px}
+    #scrubber-fill{height:100%;background:#1DB954;border-radius:2px;width:0%;pointer-events:none}
+    #scrubber-thumb{position:absolute;top:50%;transform:translate(-50%,-50%);width:12px;height:12px;border-radius:50%;background:#fff;pointer-events:none;left:0%}
     .scrubber-times{display:flex;justify-content:space-between;font-size:12px;opacity:.5}
     .controls{display:flex;align-items:center;justify-content:center;gap:32px}
     .ctrl-btn{background:none;border:none;cursor:pointer;color:#fff;font-size:28px;opacity:.85;padding:8px;line-height:1}
     .ctrl-btn:hover{opacity:1}
-    .play-btn{background:#1DB954;border:none;cursor:pointer;width:64px;height:64px;border-radius:50%;font-size:22px;display:flex;align-items:center;justify-content:center;color:#000;flex-shrink:0}
-    .play-btn:hover{background:#1ed760}
-    .taste-section{margin-top:1.5rem;padding-top:1.5rem;border-top:0.5px solid rgba(255,255,255,0.1)}
+    #play-btn{background:#1DB954;border:none;cursor:pointer;width:64px;height:64px;border-radius:50%;font-size:22px;display:flex;align-items:center;justify-content:center;color:#000;flex-shrink:0}
+    #play-btn:hover{background:#1ed760}
+    #taste-section{margin-top:1.5rem;padding-top:1.5rem;border-top:0.5px solid rgba(255,255,255,0.1);display:none}
     .taste-label{font-size:11px;opacity:.4;margin-bottom:8px;text-transform:uppercase;letter-spacing:1px}
-    .taste-tags{display:flex;gap:8px;flex-wrap:wrap}
+    #taste-tags{display:flex;gap:8px;flex-wrap:wrap}
     .tag{font-size:12px;padding:3px 10px;border-radius:20px;background:rgba(255,255,255,0.1);border:0.5px solid rgba(255,255,255,0.2)}
     .tag.green{background:rgba(29,185,84,0.2);border-color:rgba(29,185,84,0.4);color:#1DB954}
     .tag.orange{background:rgba(255,150,0,0.15);border-color:rgba(255,150,0,0.3);color:#ffaa44}
@@ -36,16 +36,76 @@
     .spotify-btn:hover{background:#1ed760}
     .note{font-size:12px;opacity:.4;margin-top:16px}
     .footer{margin-top:12px;font-size:11px;opacity:.3;text-align:center}
+    #overlay{position:fixed;inset:0;background:rgba(0,0,0,.7);display:flex;align-items:center;justify-content:center;z-index:100}
+    #overlay-box{background:#1a1a2e;border-radius:20px;padding:2rem;text-align:center;max-width:300px}
+    #overlay-box p{font-size:14px;opacity:.7;margin-bottom:1.5rem;line-height:1.6}
+    #overlay-box button{background:#1DB954;border:none;color:#000;padding:12px 28px;border-radius:40px;font-size:15px;font-weight:500;cursor:pointer;width:100%}
   </style>
 </head>
 <body>
-<div id="app"></div>
+
+<!-- Static player shell — only dynamic parts update -->
+<div id="app">
+  <div id="screen-login" class="center" style="display:none">
+    <div style="font-size:48px">🎵</div>
+    <h1>Attune</h1>
+    <p>Music that learns how you listen.<br>Connect your Spotify to get started.</p>
+    <button class="spotify-btn" id="btn-login">Connect with Spotify</button>
+    <p class="note">Requires Spotify Premium for in-browser playback</p>
+  </div>
+
+  <div id="screen-loading" class="center" style="display:none">
+    <p style="opacity:.6">Loading your music...</p>
+  </div>
+
+  <div id="screen-error" class="center" style="display:none">
+    <div style="font-size:36px;margin-bottom:12px">⚠️</div>
+    <p id="error-msg"></p>
+    <button class="spotify-btn" id="btn-reconnect" style="margin-top:1rem">Reconnect</button>
+  </div>
+
+  <div id="player-card">
+    <div id="album-art">🎵</div>
+    <div id="song-title">—</div>
+    <div id="song-sub">—</div>
+    <div class="scrubber-wrap">
+      <div id="scrubber">
+        <div id="scrubber-fill"></div>
+        <div id="scrubber-thumb"></div>
+      </div>
+      <div class="scrubber-times">
+        <span id="t-pos">0:00</span>
+        <span id="t-dur">0:00</span>
+      </div>
+    </div>
+    <div class="controls">
+      <button class="ctrl-btn" id="btn-rev" aria-label="Rewind or previous">⏮</button>
+      <button id="play-btn" aria-label="Play">▶</button>
+      <button class="ctrl-btn" id="btn-fwd" aria-label="Skip">⏭</button>
+    </div>
+    <div id="taste-section">
+      <div class="taste-label">Your vibe right now</div>
+      <div id="taste-tags"></div>
+    </div>
+  </div>
+  <div class="footer" id="footer" style="display:none">Attune · powered by Spotify</div>
+</div>
+
+<!-- Tap-to-start overlay (required for autoplay policy) -->
+<div id="overlay" style="display:none">
+  <div id="overlay-box">
+    <div style="font-size:40px;margin-bottom:1rem">🎵</div>
+    <p>Tap below to start Attune.<br>Your browser requires a tap before audio can play.</p>
+    <button id="btn-start">Start Listening</button>
+  </div>
+</div>
+
 <script>
-const CLIENT_ID   = "5937b0c160f6465a8c9224752ed9f4bb";
+const CLIENT_ID    = "5937b0c160f6465a8c9224752ed9f4bb";
 const REDIRECT_URI = "https://scintillating-donut-fc23d8.netlify.app";
 const SCOPES = "streaming user-read-email user-read-private user-read-playback-state user-modify-playback-state user-read-currently-playing user-library-read user-top-read";
 
-// ── PKCE auth ─────────────────────────────────────────────
+// ── PKCE ─────────────────────────────────────────────────
 function b64url(buf){return btoa(String.fromCharCode(...buf)).replace(/\+/g,"-").replace(/\//g,"_").replace(/=+$/,"")}
 async function genPKCE(){
   const v=b64url(crypto.getRandomValues(new Uint8Array(32)));
@@ -68,8 +128,7 @@ async function exchangeCode(code){
   saveTokens(d);
 }
 async function tryRefresh(){
-  const ref=localStorage.getItem("a_ref");
-  if(!ref)return null;
+  const ref=localStorage.getItem("a_ref");if(!ref)return null;
   const r=await fetch("https://accounts.spotify.com/api/token",{
     method:"POST",headers:{"Content-Type":"application/x-www-form-urlencoded"},
     body:new URLSearchParams({client_id:CLIENT_ID,grant_type:"refresh_token",refresh_token:ref}),
@@ -89,23 +148,87 @@ async function getToken(){
 }
 
 // ── State ─────────────────────────────────────────────────
-let screen="login";       // login | loading | player | error
-let sdkReady=false;
-let player=null;
-let deviceId=null;
-let pbState=null;         // playbackState from SDK
-let pos=0;                // position in ms
-let queue=[];
-let qi=0;                 // queue index
+let sdkPlayer=null, deviceId=null, pbState=null;
+let pos=0, queue=[], qi=0;
 let weights={energy:{},valence:{},tempo:{},decade:{}};
-let playedLog={};         // id -> timestamp
-let skipStreak=0;
-let feats={};             // id -> audio features
-let topArtists=[];
-let scrubHist=[];
-let pauseAt=null;
-let advancing=false;
-let lastUri=null;
+let playedLog={}, skipStreak=0, feats={}, topArtists=[];
+let scrubHist=[], pauseAt=null, advancing=false, lastUri=null;
+let currentArt="", currentTrackId="";
+
+// ── DOM refs ──────────────────────────────────────────────
+const screens={
+  login:document.getElementById("screen-login"),
+  loading:document.getElementById("screen-loading"),
+  error:document.getElementById("screen-error"),
+  player:document.getElementById("player-card"),
+};
+const elArt      = document.getElementById("album-art");
+const elTitle    = document.getElementById("song-title");
+const elSub      = document.getElementById("song-sub");
+const elFill     = document.getElementById("scrubber-fill");
+const elThumb    = document.getElementById("scrubber-thumb");
+const elTPos     = document.getElementById("t-pos");
+const elTDur     = document.getElementById("t-dur");
+const elPlayBtn  = document.getElementById("play-btn");
+const elTasteSec = document.getElementById("taste-section");
+const elTasteTags= document.getElementById("taste-tags");
+const elFooter   = document.getElementById("footer");
+const elOverlay  = document.getElementById("overlay");
+const elErrMsg   = document.getElementById("error-msg");
+
+function showScreen(name,msg){
+  Object.values(screens).forEach(s=>s.style.display="none");
+  elFooter.style.display="none";
+  if(name==="error"&&msg)elErrMsg.textContent=msg;
+  if(name==="player"){screens.player.style.display="block";elFooter.style.display="block";}
+  else if(screens[name])screens[name].style.display="block";
+}
+
+// ── Targeted DOM updates (no full re-render) ──────────────
+function updateProgress(){
+  const dur=pbState?.duration||0;
+  const pct=dur?Math.min(100,(pos/dur)*100):0;
+  elFill.style.width=pct.toFixed(1)+"%";
+  elThumb.style.left=pct.toFixed(1)+"%";
+  elTPos.textContent=fmt(pos);
+  elTDur.textContent=fmt(dur);
+}
+function updatePlayBtn(){
+  const paused=pbState?.paused??true;
+  elPlayBtn.textContent=paused?"▶":"⏸";
+  elPlayBtn.setAttribute("aria-label",paused?"Play":"Pause");
+}
+function updateTrackInfo(){
+  const cur=queue[qi];if(!cur)return;
+  // Only swap album art DOM if track actually changed
+  if(cur.id!==currentTrackId){
+    currentTrackId=cur.id;
+    const art=cur.album?.images?.[0]?.url||"";
+    if(art!==currentArt){
+      currentArt=art;
+      elArt.innerHTML=art?`<img src="${art}" alt="album art" loading="lazy"/>`:"🎵";
+    }
+    elTitle.textContent=cur.name||"—";
+    elTitle.title=cur.name||"";
+    elSub.textContent=(cur.artists?.map(a=>a.name).join(", ")||"Unknown")+(cur.album?.name?" · "+cur.album.name:"");
+  }
+}
+function updateTaste(){
+  const topE=Object.entries(weights.energy).sort((a,b)=>b[1]-a[1])[0]?.[0];
+  const topV=Object.entries(weights.valence).sort((a,b)=>b[1]-a[1])[0]?.[0];
+  if(!topE&&!topV){elTasteSec.style.display="none";return;}
+  elTasteSec.style.display="block";
+  elTasteTags.innerHTML=
+    (topE?`<span class="tag green">${topE} energy</span>`:"")+
+    (topV?`<span class="tag">${topV}</span>`:"")+
+    (skipStreak>=3?`<span class="tag orange">switching it up</span>`:"");
+}
+function draw(){
+  updateTrackInfo();
+  updateProgress();
+  updatePlayBtn();
+  updateTaste();
+}
 
 // ── Helpers ───────────────────────────────────────────────
 function fmt(ms){
@@ -113,59 +236,43 @@ function fmt(ms){
   const s=Math.floor(ms/1000);
   return`${Math.floor(s/60)}:${(s%60).toString().padStart(2,"0")}`;
 }
-function adjW(attrs,delta){
-  for(const[k,v]of Object.entries(attrs))
-    if(v!=null&&v!==undefined)weights[k][v]=(weights[k][v]||0)+delta;
-}
-function attrs(track){
+function adjW(a,delta){for(const[k,v]of Object.entries(a))if(v!=null)weights[k][v]=(weights[k][v]||0)+delta;}
+function tAttrs(track){
   const yr=track?.album?.release_date?.slice(0,4);
   const f=feats[track?.id];
   const a={decade:yr?`${Math.floor(parseInt(yr)/10)*10}s`:null};
-  if(f){
-    a.energy=f.energy>0.66?"high":f.energy>0.33?"medium":"low";
-    a.valence=f.valence>0.66?"happy":f.valence>0.33?"neutral":"sad";
-    a.tempo=f.tempo>140?"fast":f.tempo>100?"mid":"slow";
-  }
+  if(f){a.energy=f.energy>0.66?"high":f.energy>0.33?"medium":"low";a.valence=f.valence>0.66?"happy":f.valence>0.33?"neutral":"sad";a.tempo=f.tempo>140?"fast":f.tempo>100?"mid":"slow";}
   return a;
 }
-function score(track){
-  const a=attrs(track);
-  let s=0;
+function scoreTrack(t){
+  const a=tAttrs(t);let s=0;
   for(const[k,v]of Object.entries(a))if(v)s+=(weights[k]?.[v]||0);
   return s+Math.random()*1.5;
 }
-function notPlayed(id){
-  const lp=playedLog[id];
-  return!lp||(Date.now()-lp)>86400000;
-}
+function notPlayed(id){const lp=playedLog[id];return!lp||(Date.now()-lp)>86400000;}
 
-// ── Spotify API ───────────────────────────────────────────
+// ── API ───────────────────────────────────────────────────
 async function api(url,opts={}){
   const tok=await getToken();
-  if(!tok){show("login");throw new Error("No token");}
+  if(!tok){showScreen("login");throw new Error("No token");}
   const r=await fetch("https://api.spotify.com/v1"+url,{
-    ...opts,
-    headers:{Authorization:"Bearer "+tok,"Content-Type":"application/json",...(opts.headers||{})},
+    ...opts,headers:{Authorization:"Bearer "+tok,"Content-Type":"application/json",...(opts.headers||{})},
   });
-  if(r.status===401){localStorage.clear();show("login");throw new Error("Auth expired");}
+  if(r.status===401){localStorage.clear();showScreen("login");throw new Error("Auth expired");}
   if(r.status===204)return null;
   if(!r.ok){const t=await r.text().catch(()=>"");throw new Error(`Spotify ${r.status}: ${t}`);}
   return r.json();
 }
 async function safeFeats(ids){
-  if(!ids||!ids.length)return;
-  try{
-    const r=await api(`/audio-features?ids=${ids.slice(0,100).join(",")}`);
-    r?.audio_features?.forEach(f=>{if(f)feats[f.id]=f;});
-  }catch(e){/* audio-features may not be available for new apps — skip silently */}
+  if(!ids?.length)return;
+  try{const r=await api(`/audio-features?ids=${ids.slice(0,100).join(",")}`);r?.audio_features?.forEach(f=>{if(f)feats[f.id]=f;});}
+  catch(e){/* may not be available for new apps */}
 }
 async function search(q,limit=6){
-  try{const r=await api(`/search?q=${encodeURIComponent(q)}&type=track&limit=${limit}&market=US`);return r?.tracks?.items||[];}
-  catch(e){return[];}
+  try{const r=await api(`/search?q=${encodeURIComponent(q)}&type=track&limit=${limit}&market=US`);return r?.tracks?.items||[];}catch(e){return[];}
 }
 async function artistTopTracks(id){
-  try{const r=await api(`/artists/${id}/top-tracks?market=US`);return r?.tracks||[];}
-  catch(e){return[];}
+  try{const r=await api(`/artists/${id}/top-tracks?market=US`);return r?.tracks||[];}catch(e){return[];}
 }
 
 // ── Discovery ─────────────────────────────────────────────
@@ -173,106 +280,77 @@ async function nextTracks(cur,skips){
   const now=Date.now();
   if(cur?.id)playedLog[cur.id]=now;
   let pool=[];
-
   if(skips>=3){
-    // Mood pivot — pick opposite energy
     const topE=Object.entries(weights.energy).sort((a,b)=>b[1]-a[1])[0]?.[0];
-    const q=topE==="high"?"chill acoustic calm":topE==="low"?"energetic upbeat dance":"indie alternative feel-good";
+    const q=topE==="high"?"chill acoustic calm":topE==="low"?"energetic upbeat dance":"indie alternative";
     pool=await search(q,8);
     skipStreak=0;
-  } else {
-    // Pull from current artist + liked artists
-    const aid=cur?.artists?.[0]?.id;
-    const ids=[...(aid?[aid]:[]),...topArtists].filter(Boolean).slice(0,4);
-    for(const id of ids){
-      const t=await artistTopTracks(id);
-      pool.push(...t);
-    }
-    // Top-up with search if thin
-    if(pool.length<4&&cur?.artists?.[0]?.name){
-      pool.push(...await search(cur.artists[0].name+" similar",6));
-    }
+  }else{
+    const ids=[...(cur?.artists?.[0]?.id?[cur.artists[0].id]:[]),...topArtists].filter(Boolean).slice(0,4);
+    for(const id of ids){pool.push(...await artistTopTracks(id));}
+    if(pool.length<4&&cur?.artists?.[0]?.name)pool.push(...await search(cur.artists[0].name+" similar",6));
   }
-
   pool=pool.filter(t=>t?.id&&t?.uri&&notPlayed(t.id)&&t.id!==cur?.id);
-  pool=[...new Map(pool.map(t=>[t.id,t])).values()]; // dedupe
-
+  pool=[...new Map(pool.map(t=>[t.id,t])).values()];
   await safeFeats(pool.map(t=>t.id));
-  pool.sort((a,b)=>score(b)-score(a));
+  pool.sort((a,b)=>scoreTrack(b)-scoreTrack(a));
   return pool.slice(0,3);
 }
 
-// ── Playback controls ─────────────────────────────────────
+// ── Playback ──────────────────────────────────────────────
 async function playTrack(track){
   if(!deviceId||!track?.uri)return;
   try{
-    await api(`/me/player/play?device_id=${deviceId}`,{
-      method:"PUT",body:JSON.stringify({uris:[track.uri]}),
-    });
+    await api(`/me/player/play?device_id=${deviceId}`,{method:"PUT",body:JSON.stringify({uris:[track.uri]})});
     lastUri=track.uri;
   }catch(e){console.warn("play failed:",e);}
 }
-
 async function songEnded(){
-  if(advancing)return;
-  advancing=true;
+  if(advancing)return;advancing=true;
   try{
-    adjW(attrs(queue[qi]),2); // full listen = strong positive
-    skipStreak=0;
+    adjW(tAttrs(queue[qi]),2);skipStreak=0;
     const next=await nextTracks(queue[qi],0);
     if(next.length)queue.splice(qi+1,0,...next);
     qi=Math.min(qi+1,queue.length-1);
-    await playTrack(queue[qi]);
-    draw();
+    await playTrack(queue[qi]);draw();
   }finally{advancing=false;}
 }
-
 async function fwd(){
-  if(advancing)return;
-  advancing=true;
+  if(advancing)return;advancing=true;
   try{
-    const cur=queue[qi];
-    const pct=pos/(pbState?.duration||1);
-    adjW(attrs(cur),pct<0.5?-1.5:pct<0.75?-0.5:0.5);
+    const cur=queue[qi],pct=pos/(pbState?.duration||1);
+    adjW(tAttrs(cur),pct<0.5?-1.5:pct<0.75?-0.5:0.5);
     skipStreak++;
     const next=await nextTracks(cur,skipStreak);
     if(next.length)queue.splice(qi+1,0,...next);
     qi=Math.min(qi+1,queue.length-1);
     scrubHist=[];
-    await playTrack(queue[qi]);
-    draw();
+    await playTrack(queue[qi]);draw();
   }finally{advancing=false;}
 }
-
 async function rev(){
   const cur=queue[qi];
   if(pos<3000){
-    adjW(attrs(cur),2);
-    qi=Math.max(0,qi-1);
+    adjW(tAttrs(cur),2);qi=Math.max(0,qi-1);
     await playTrack(queue[qi]);
   }else{
-    adjW(attrs(cur),1.5);
+    adjW(tAttrs(cur),1.5);
     try{await api("/me/player/seek?position_ms=0",{method:"PUT"});}catch(e){}
   }
   draw();
 }
-
-async function playPause(){
-  if(!player)return;
+async function togglePlay(){
+  if(!sdkPlayer)return;
   try{
-    const s=await player.getCurrentState();
-    if(!s)return;
-    if(s.paused){
-      if(pauseAt&&(Date.now()-pauseAt)>30000)adjW(attrs(queue[qi]),-0.5);
-      pauseAt=null;
-      await api(`/me/player/play?device_id=${deviceId}`,{method:"PUT"});
-    }else{
-      pauseAt=Date.now();
-      await api("/me/player/pause",{method:"PUT"});
-    }
-  }catch(e){console.warn("playPause error:",e);}
+    // Use SDK toggle — works reliably with browser autoplay policy
+    await sdkPlayer.togglePlay();
+    // Sync state after short delay
+    setTimeout(async()=>{
+      const s=await sdkPlayer.getCurrentState();
+      if(s){pbState=s;pos=s.position;updatePlayBtn();}
+    },200);
+  }catch(e){console.warn("togglePlay error:",e);}
 }
-
 function scrub(e){
   const rect=e.currentTarget.getBoundingClientRect();
   const ratio=Math.max(0,Math.min(1,(e.clientX-rect.left)/rect.width));
@@ -280,191 +358,97 @@ function scrub(e){
   const newPos=ratio*dur,oldPos=pos,delta=newPos-oldPos;
   const cur=queue[qi],now=Date.now();
   scrubHist=[...scrubHist.filter(x=>now-x.t<5000),{from:oldPos,to:newPos,t:now}];
-  if(scrubHist.filter(x=>Math.abs(x.from-x.to)<dur*0.2).length>=3)adjW(attrs(cur),2);
-  if(newPos<2000&&oldPos>5000)adjW(attrs(cur),2);
-  else if(delta<0)adjW(attrs(cur),0.5);
-  else if(delta>dur*0.4)adjW(attrs(cur),-1);
+  if(scrubHist.filter(x=>Math.abs(x.from-x.to)<dur*0.2).length>=3)adjW(tAttrs(cur),2);
+  if(newPos<2000&&oldPos>5000)adjW(tAttrs(cur),2);
+  else if(delta<0)adjW(tAttrs(cur),0.5);
+  else if(delta>dur*0.4)adjW(tAttrs(cur),-1);
   pos=newPos;
+  updateProgress();
   api(`/me/player/seek?position_ms=${Math.floor(newPos)}`,{method:"PUT"}).catch(()=>{});
-  draw();
 }
 
-// ── Seed / load ───────────────────────────────────────────
+// ── Seed load ─────────────────────────────────────────────
 async function loadSeeds(){
-  show("loading");
+  showScreen("loading");
   try{
-    // 1. Top tracks
     let tracks=[];
     try{const r=await api("/me/top/tracks?limit=20&time_range=medium_term");tracks=r?.items||[];}catch(e){}
-
-    // 2. Top artists (for future recs)
     try{const r=await api("/me/top/artists?limit=10&time_range=medium_term");topArtists=(r?.items||[]).map(a=>a.id);}catch(e){}
-
-    // 3. Fallback: saved tracks
-    if(tracks.length<5){
-      try{const r=await api("/me/tracks?limit=20&market=US");tracks=[...tracks,...(r?.items||[]).map(i=>i.track).filter(Boolean)];}catch(e){}
-    }
-
-    // 4. Last resort: search
-    if(tracks.length<3){
-      tracks=[...tracks,...await search("top hits",10)];
-    }
-
+    if(tracks.length<5){try{const r=await api("/me/tracks?limit=20&market=US");tracks=[...tracks,...(r?.items||[]).map(i=>i.track).filter(Boolean)];}catch(e){}}
+    if(tracks.length<3)tracks=[...tracks,...await search("top hits",10)];
     tracks=tracks.filter(t=>t?.id&&t?.uri);
-    if(!tracks.length)throw new Error("No playable tracks found. Make sure your Spotify account has listening history, or try reconnecting.");
-
+    if(!tracks.length)throw new Error("No playable tracks found. Make sure your Spotify account has some listening history.");
     await safeFeats(tracks.map(t=>t.id));
     queue=[...new Map(tracks.map(t=>[t.id,t])).values()].slice(0,20);
-    qi=0;
-    show("player");
-    await playTrack(queue[0]);
-  }catch(e){show("error",e.message);}
+    qi=0;lastUri=queue[0]?.uri;
+    showScreen("player");
+    draw();
+    // Show tap-to-start overlay (browser autoplay policy requires user gesture)
+    elOverlay.style.display="flex";
+  }catch(e){showScreen("error",e.message);}
 }
 
-// ── SDK init ──────────────────────────────────────────────
+// ── SDK ───────────────────────────────────────────────────
 function initSDK(){
   window.onSpotifyWebPlaybackSDKReady=()=>{
-    sdkReady=true;
-    player=new window.Spotify.Player({
+    sdkPlayer=new window.Spotify.Player({
       name:"Attune",
       getOAuthToken:async cb=>cb(await getToken()),
       volume:0.8,
     });
-
-    player.addListener("ready",({device_id})=>{
-      deviceId=device_id;
-      loadSeeds();
-    });
-
-    player.addListener("not_ready",()=>{deviceId=null;});
-
-    player.addListener("player_state_changed",s=>{
+    sdkPlayer.addListener("ready",({device_id})=>{deviceId=device_id;loadSeeds();});
+    sdkPlayer.addListener("not_ready",()=>{deviceId=null;});
+    sdkPlayer.addListener("player_state_changed",s=>{
       if(!s)return;
       const prev=s.track_window?.previous_tracks||[];
-      // Detect natural song end: paused at 0 and our track moved to previous
       if(!advancing&&s.paused&&s.position===0&&prev.some(t=>t.uri===lastUri)&&s.track_window?.current_track?.uri!==lastUri){
-        songEnded();
-        return;
+        songEnded();return;
       }
-      pbState=s;
-      pos=s.position;
-      if(screen==="player")draw();
+      pbState=s;pos=s.position;
+      updateProgress();updatePlayBtn();
     });
+    sdkPlayer.addListener("account_error",()=>showScreen("error","Spotify Premium is required for in-browser playback."));
+    sdkPlayer.addListener("authentication_error",()=>showScreen("error","Authentication failed. Please reconnect."));
+    sdkPlayer.addListener("initialization_error",({message})=>showScreen("error","Player could not start: "+message));
+    sdkPlayer.connect();
 
-    player.addListener("account_error",()=>show("error","Spotify Premium is required for in-browser playback."));
-    player.addListener("authentication_error",()=>show("error","Authentication failed. Please reconnect."));
-    player.addListener("initialization_error",({message})=>show("error","Player could not start: "+message));
-
-    player.connect();
-
-    // Position poll
     setInterval(async()=>{
-      if(screen!=="player"||!player)return;
-      try{
-        const s=await player.getCurrentState();
-        if(s){pbState=s;pos=s.position;draw();}
-      }catch(e){}
+      if(!sdkPlayer||elOverlay.style.display!=="none")return;
+      try{const s=await sdkPlayer.getCurrentState();if(s){pbState=s;pos=s.position;updateProgress();updatePlayBtn();}}
+      catch(e){}
     },500);
   };
-
-  const s=document.createElement("script");
-  s.src="https://sdk.scdn.co/spotify-player.js";
-  s.async=true;
-  document.body.appendChild(s);
+  const s=document.createElement("script");s.src="https://sdk.scdn.co/spotify-player.js";s.async=true;document.body.appendChild(s);
 }
 
-// ── Render ────────────────────────────────────────────────
-function show(s,msg){screen=s;_render(s,msg);}
-function draw(){if(screen==="player")_render("player");}
-
-function _render(s,msg){
-  const app=document.getElementById("app");
-  if(!app)return;
-
-  if(s==="login"){
-    app.innerHTML=`
-      <div class="center">
-        <div style="font-size:48px">🎵</div>
-        <h1>Attune</h1>
-        <p>Music that learns how you listen.<br>Connect your Spotify to get started.</p>
-        <button class="spotify-btn" onclick="doLogin()">Connect with Spotify</button>
-        <p class="note">Requires Spotify Premium for in-browser playback</p>
-      </div>`;
-
-  }else if(s==="loading"){
-    app.innerHTML=`<div class="center"><p style="opacity:.6;margin:0">Loading your music...</p></div>`;
-
-  }else if(s==="error"){
-    app.innerHTML=`
-      <div class="center">
-        <div style="font-size:36px;margin-bottom:12px">⚠️</div>
-        <p>${msg||"Something went wrong."}</p>
-        <button class="spotify-btn" style="margin-top:1rem" onclick="doLogin()">Reconnect</button>
-      </div>`;
-
-  }else if(s==="player"){
-    const cur=queue[qi];
-    if(!cur)return;
-    const art=cur.album?.images?.[0]?.url;
-    const dur=pbState?.duration||0;
-    const pct=dur?Math.min(100,(pos/dur)*100):0;
-    const paused=pbState?.paused??true;
-    const topE=Object.entries(weights.energy).sort((a,b)=>b[1]-a[1])[0]?.[0];
-    const topV=Object.entries(weights.valence).sort((a,b)=>b[1]-a[1])[0]?.[0];
-    const artist=cur.artists?.map(a=>a.name).join(", ")||"Unknown";
-
-    app.innerHTML=`
-      <div class="card">
-        <div class="album-art">${art?`<img src="${art}" alt="album art" loading="lazy"/>`:"🎵"}</div>
-        <div class="song-title" title="${(cur.name||"").replace(/"/g,"")}">${cur.name||"—"}</div>
-        <div class="song-sub">${artist}${cur.album?.name?" · "+cur.album.name:""}</div>
-        <div class="scrubber-wrap">
-          <div class="scrubber-track" id="sc">
-            <div class="scrubber-fill" style="width:${pct.toFixed(1)}%"></div>
-            <div class="scrubber-thumb" style="left:${pct.toFixed(1)}%"></div>
-          </div>
-          <div class="scrubber-times"><span>${fmt(pos)}</span><span>${fmt(dur)}</span></div>
-        </div>
-        <div class="controls">
-          <button class="ctrl-btn" onclick="rev()" aria-label="Rewind or previous">⏮</button>
-          <button class="play-btn" onclick="playPause()" aria-label="${paused?"Play":"Pause"}">${paused?"▶":"⏸"}</button>
-          <button class="ctrl-btn" onclick="fwd()" aria-label="Skip">⏭</button>
-        </div>
-        ${topE||topV?`
-        <div class="taste-section">
-          <div class="taste-label">Your vibe right now</div>
-          <div class="taste-tags">
-            ${topE?`<span class="tag green">${topE} energy</span>`:""}
-            ${topV?`<span class="tag">${topV}</span>`:""}
-            ${skipStreak>=3?`<span class="tag orange">switching it up</span>`:""}
-          </div>
-        </div>`:""}
-      </div>
-      <div class="footer">Attune · powered by Spotify</div>`;
-
-    document.getElementById("sc")?.addEventListener("click",scrub);
-  }
-}
+// ── Event listeners (persistent — never re-attached) ──────
+document.getElementById("btn-login").addEventListener("click",doLogin);
+document.getElementById("btn-reconnect").addEventListener("click",doLogin);
+document.getElementById("btn-rev").addEventListener("click",rev);
+document.getElementById("btn-fwd").addEventListener("click",fwd);
+document.getElementById("play-btn").addEventListener("click",togglePlay);
+document.getElementById("scrubber").addEventListener("click",scrub);
+document.getElementById("btn-start").addEventListener("click",async()=>{
+  elOverlay.style.display="none";
+  // First play triggered by user gesture — satisfies browser autoplay policy
+  await playTrack(queue[qi]);
+});
 
 // ── Boot ──────────────────────────────────────────────────
 (async()=>{
   const p=new URLSearchParams(window.location.search);
   const code=p.get("code"),err=p.get("error");
   window.history.replaceState({},"",window.location.pathname);
-
-  if(err){
-    show("error",err==="access_denied"?"You declined Spotify access. Please try again.":`Spotify error: ${err}`);
-    return;
-  }
+  if(err){showScreen("error",err==="access_denied"?"You declined Spotify access. Please try again.":`Spotify error: ${err}`);return;}
   if(code){
-    show("loading");
+    showScreen("loading");
     try{await exchangeCode(code);initSDK();}
-    catch(e){show("error",e.message);}
+    catch(e){showScreen("error",e.message);}
     return;
   }
   const tok=await getToken();
-  if(tok){show("loading");initSDK();}
-  else show("login");
+  if(tok){showScreen("loading");initSDK();}
+  else showScreen("login");
 })();
 </script>
 </body>

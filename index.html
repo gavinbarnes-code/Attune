@@ -82,7 +82,7 @@
       <button class="ctrl-btn" id="btn-fwd" aria-label="Skip">⏭</button>
     </div>
     <div id="taste-section">
-      <div class="taste-label">Your vibe right now</div>
+      <div class="taste-label">Learning your taste</div>
       <div id="taste-tags"></div>
     </div>
   </div>
@@ -101,8 +101,131 @@
 const CLIENT_ID    = "5937b0c160f6465a8c9224752ed9f4bb";
 const REDIRECT_URI = "https://scintillating-donut-fc23d8.netlify.app";
 const SCOPES = "streaming user-read-email user-read-private user-read-playback-state user-modify-playback-state user-read-currently-playing user-library-read user-top-read";
+const STORAGE_KEY  = "attune_weights_v1";
 
-// ── PKCE ─────────────────────────────────────────────────
+// ─────────────────────────────────────────────────────────
+// SYNAPSE-STYLE ALGORITHM
+//
+// Inspired by Zuckerberg's Synapse (1999 Winamp plugin):
+//  - Starts cold with no user data — seeds with popular cross-genre songs
+//  - Every interaction is a signal that reinforces or dampens attribute weights
+//  - Weights decay over time so recent attention matters more than old
+//  - Scores each candidate song against the current weight vector
+//  - Adds controlled randomness for discovery (epsilon-greedy)
+//  - Persists weights to localStorage across sessions
+//  - Never touches Spotify listening history or preferences
+// ─────────────────────────────────────────────────────────
+
+// Seed playlist: ~25 globally popular tracks across 10 genres.
+// These are searched by name+artist to get real Spotify URIs at runtime.
+const SEED_QUERIES = [
+  // Pop
+  {q:"Blinding Lights The Weeknd",          genre:"pop"},
+  {q:"Shape of You Ed Sheeran",             genre:"pop"},
+  {q:"As It Was Harry Styles",              genre:"pop"},
+  {q:"Bad Guy Billie Eilish",               genre:"pop"},
+  // Hip-Hop
+  {q:"God's Plan Drake",                    genre:"hip-hop"},
+  {q:"HUMBLE Kendrick Lamar",               genre:"hip-hop"},
+  {q:"Sicko Mode Travis Scott",             genre:"hip-hop"},
+  {q:"Lose Yourself Eminem",                genre:"hip-hop"},
+  // Rock / Alternative
+  {q:"Mr Brightside The Killers",           genre:"rock"},
+  {q:"Come As You Are Nirvana",             genre:"rock"},
+  {q:"Bohemian Rhapsody Queen",             genre:"rock"},
+  {q:"Smells Like Teen Spirit Nirvana",     genre:"rock"},
+  // R&B / Soul
+  {q:"Crazy in Love Beyonce",               genre:"r&b"},
+  {q:"Redbone Childish Gambino",            genre:"r&b"},
+  {q:"No Scrubs TLC",                       genre:"r&b"},
+  // Electronic / Dance
+  {q:"Levels Avicii",                       genre:"electronic"},
+  {q:"One More Time Daft Punk",             genre:"electronic"},
+  {q:"Titanium David Guetta",               genre:"electronic"},
+  // Country
+  {q:"Jolene Dolly Parton",                 genre:"country"},
+  {q:"Take Me Home Country Roads John Denver",genre:"country"},
+  // Latin
+  {q:"Despacito Luis Fonsi",                genre:"latin"},
+  {q:"Hips Don't Lie Shakira",              genre:"latin"},
+  // Classical / Instrumental
+  {q:"Clair de Lune Debussy",               genre:"classical"},
+  {q:"Four Seasons Spring Vivaldi",         genre:"classical"},
+  // Indie
+  {q:"Electric Feel MGMT",                  genre:"indie"},
+  {q:"Do I Wanna Know Arctic Monkeys",      genre:"indie"},
+  // Jazz
+  {q:"Fly Me to the Moon Frank Sinatra",    genre:"jazz"},
+  {q:"So What Miles Davis",                 genre:"jazz"},
+];
+
+// ── Weight system ─────────────────────────────────────────
+// weights = { genre:{}, energy:{}, valence:{}, tempo:{}, decade:{} }
+// Each key maps to a float. Positive = user engages, Negative = user avoids.
+// Decay: on every session load, multiply all weights by 0.92 (≈8% weekly fade).
+
+const DECAY = 0.92; // applied once per session load
+
+function emptyWeights(){
+  return{genre:{},energy:{},valence:{},tempo:{},decade:{}};
+}
+function loadWeights(){
+  try{
+    const raw=localStorage.getItem(STORAGE_KEY);
+    if(!raw)return emptyWeights();
+    const parsed=JSON.parse(raw);
+    // Apply time-based decay using stored timestamp
+    const lastSaved=parsed._savedAt||Date.now();
+    const daysSince=(Date.now()-lastSaved)/(1000*60*60*24);
+    const decayFactor=Math.pow(DECAY,daysSince); // ~8% per day compound
+    const w=parsed.weights||emptyWeights();
+    for(const cat of Object.keys(w))
+      for(const k of Object.keys(w[cat]))
+        w[cat][k]*=decayFactor;
+    return w;
+  }catch(e){return emptyWeights();}
+}
+function saveWeights(){
+  try{
+    localStorage.setItem(STORAGE_KEY,JSON.stringify({weights,_savedAt:Date.now()}));
+  }catch(e){}
+}
+
+let weights=loadWeights();
+
+// Adjust weights: add delta to every attribute of a track
+function adjW(attrs, delta){
+  for(const[cat,val]of Object.entries(attrs))
+    if(val!=null&&val!=="unknown")
+      weights[cat][val]=(weights[cat][val]||0)+delta;
+  saveWeights(); // persist immediately
+}
+
+// Extract attribute fingerprint from a track + its audio features + injected genre
+function tAttrs(track){
+  const f=feats[track?.id];
+  const yr=track?.album?.release_date?.slice(0,4);
+  return{
+    genre: track._genre||null,
+    energy: f?(f.energy>0.66?"high":f.energy>0.33?"medium":"low"):null,
+    valence: f?(f.valence>0.66?"happy":f.valence>0.33?"neutral":"sad"):null,
+    tempo:  f?(f.tempo>140?"fast":f.tempo>100?"mid":"slow"):null,
+    decade: yr?`${Math.floor(parseInt(yr)/10)*10}s`:null,
+  };
+}
+
+// Score a candidate track against current weights (dot product)
+function scoreTrack(track){
+  const a=tAttrs(track);
+  let s=0;
+  for(const[cat,val]of Object.entries(a))
+    if(val)s+=(weights[cat]?.[val]||0);
+  // Epsilon-greedy: 15% pure random exploration to avoid filter bubble
+  s+=Math.random()<0.15 ? 10 : Math.random()*1.5;
+  return s;
+}
+
+// ── PKCE auth ─────────────────────────────────────────────
 function b64url(buf){return btoa(String.fromCharCode(...buf)).replace(/\+/g,"-").replace(/\//g,"_").replace(/=+$/,"")}
 async function genPKCE(){
   const v=b64url(crypto.getRandomValues(new Uint8Array(32)));
@@ -144,23 +267,16 @@ async function getToken(){
   return tryRefresh();
 }
 
-// ── State ─────────────────────────────────────────────────
+// ── Player state ──────────────────────────────────────────
 let sdkPlayer=null, deviceId=null, pbState=null, pos=0;
-
-// Queue is a fixed ordered list. qi is the cursor.
-// New songs are always appended to the END — never inserted mid-queue.
-// Going back/forward just moves qi. The history is always preserved.
-let queue=[];   // full ordered history + future songs
-let qi=0;       // current index into queue
-
-let weights={energy:{},valence:{},tempo:{},decade:{}};
-let playedLog={};   // trackId -> timestamp last played
+let queue=[], qi=0;
+let playedLog={};       // trackId -> {timestamp, listenedMs}
 let skipStreak=0;
-let feats={};       // trackId -> audio features
-let topArtists=[];
+let feats={};           // trackId -> Spotify audio features
 let scrubHist=[], pauseAt=null, advancing=false, lastUri=null;
 let currentTrackId="", currentArt="";
-let isScrubbing=false;  // true while user is dragging scrubber
+let isScrubbing=false;
+let trackStartPos=0;    // position when current track started (for heard-ms calc)
 
 // ── DOM ───────────────────────────────────────────────────
 const screens={login:document.getElementById("screen-login"),loading:document.getElementById("screen-loading"),error:document.getElementById("screen-error"),player:document.getElementById("player-card")};
@@ -186,15 +302,13 @@ function showScreen(name,msg){
   if(name==="player"){screens.player.style.display="block";elFooter.style.display="block";}
   else if(screens[name])screens[name].style.display="block";
 }
-
-// ── Targeted updates ──────────────────────────────────────
 function fmt(ms){
   if(!ms&&ms!==0)return"0:00";
   const s=Math.floor(ms/1000);
   return`${Math.floor(s/60)}:${(s%60).toString().padStart(2,"0")}`;
 }
 function updateProgress(){
-  if(isScrubbing)return; // don't override while user is dragging
+  if(isScrubbing)return;
   const dur=pbState?.duration||0;
   const pct=dur?Math.min(100,(pos/dur)*100):0;
   elFill.style.width=pct.toFixed(2)+"%";
@@ -218,43 +332,26 @@ function updateTrackInfo(){
   }
 }
 function updateTaste(){
-  const topE=Object.entries(weights.energy).sort((a,b)=>b[1]-a[1])[0]?.[0];
-  const topV=Object.entries(weights.valence).sort((a,b)=>b[1]-a[1])[0]?.[0];
-  if(!topE&&!topV){elTasteSec.style.display="none";return;}
+  // Show top 3 weights across all categories
+  const all=[];
+  for(const[cat,vals]of Object.entries(weights))
+    for(const[val,score]of Object.entries(vals))
+      if(score>0.5)all.push({label:`${val}`,score});
+  all.sort((a,b)=>b.score-a.score);
+  const top=all.slice(0,4);
+  if(!top.length){elTasteSec.style.display="none";return;}
   elTasteSec.style.display="block";
-  elTasteTags.innerHTML=(topE?`<span class="tag green">${topE} energy</span>`:"")+
-    (topV?`<span class="tag">${topV}</span>`:"")+
+  elTasteTags.innerHTML=top.map(x=>`<span class="tag green">${x.label}</span>`).join("")+
     (skipStreak>=3?`<span class="tag orange">switching it up</span>`:"");
 }
 function draw(){updateTrackInfo();updateProgress();updatePlayBtn();updateTaste();}
-
-// ── Helpers ───────────────────────────────────────────────
-function adjW(a,delta){for(const[k,v]of Object.entries(a))if(v!=null)weights[k][v]=(weights[k][v]||0)+delta;}
-function tAttrs(track){
-  const yr=track?.album?.release_date?.slice(0,4);
-  const f=feats[track?.id];
-  const a={decade:yr?`${Math.floor(parseInt(yr)/10)*10}s`:null};
-  if(f){a.energy=f.energy>0.66?"high":f.energy>0.33?"medium":"low";a.valence=f.valence>0.66?"happy":f.valence>0.33?"neutral":"sad";a.tempo=f.tempo>140?"fast":f.tempo>100?"mid":"slow";}
-  return a;
-}
-function scoreTrack(t){
-  const a=tAttrs(t);let s=0;
-  for(const[k,v]of Object.entries(a))if(v)s+=(weights[k]?.[v]||0);
-  return s+Math.random()*1.5;
-}
-function notPlayed(id){const lp=playedLog[id];return!lp||(Date.now()-lp)>86400000;}
-function posFromEvent(e){
-  const rect=elScrubber.getBoundingClientRect();
-  const clientX=e.touches?e.touches[0].clientX:e.clientX;
-  return Math.max(0,Math.min(1,(clientX-rect.left)/rect.width));
-}
 function setPct(pct){
   elFill.style.width=(pct*100).toFixed(2)+"%";
   elThumb.style.left=(pct*100).toFixed(2)+"%";
   elTPos.textContent=fmt(pct*(pbState?.duration||0));
 }
 
-// ── API ───────────────────────────────────────────────────
+// ── Spotify API ───────────────────────────────────────────
 async function api(url,opts={}){
   const tok=await getToken();
   if(!tok){showScreen("login");throw new Error("No token");}
@@ -268,37 +365,143 @@ async function api(url,opts={}){
 }
 async function safeFeats(ids){
   if(!ids?.length)return;
-  try{const r=await api(`/audio-features?ids=${ids.slice(0,100).join(",")}`);r?.audio_features?.forEach(f=>{if(f)feats[f.id]=f;});}
-  catch(e){}
+  try{
+    const r=await api(`/audio-features?ids=${ids.slice(0,100).join(",")}`);
+    r?.audio_features?.forEach(f=>{if(f)feats[f.id]=f;});
+  }catch(e){}
 }
-async function search(q,limit=6){
-  try{const r=await api(`/search?q=${encodeURIComponent(q)}&type=track&limit=${limit}&market=US`);return r?.tracks?.items||[];}catch(e){return[];}
+async function searchOne(query){
+  try{
+    const r=await api(`/search?q=${encodeURIComponent(query)}&type=track&limit=1&market=US`);
+    return r?.tracks?.items?.[0]||null;
+  }catch(e){return null;}
+}
+async function searchMany(query,limit=8){
+  try{
+    const r=await api(`/search?q=${encodeURIComponent(query)}&type=track&limit=${limit}&market=US`);
+    return r?.tracks?.items||[];
+  }catch(e){return[];}
 }
 async function artistTopTracks(id){
   try{const r=await api(`/artists/${id}/top-tracks?market=US`);return r?.tracks||[];}catch(e){return[];}
 }
+async function artistInfo(id){
+  try{return await api(`/artists/${id}`);}catch(e){return null;}
+}
 
-// ── Discovery — appends to end of queue only ──────────────
-async function appendNextTracks(cur,skips){
+// ── Seed load — no Spotify history used ──────────────────
+async function loadSeeds(){
+  showScreen("loading");
+  try{
+    // Resolve each seed query to a real Spotify track, inject genre label
+    const resolved=[];
+    for(const seed of SEED_QUERIES){
+      const track=await searchOne(seed.q);
+      if(track){track._genre=seed.genre;resolved.push(track);}
+    }
+    if(!resolved.length)throw new Error("Could not load seed tracks. Check your connection and try again.");
+
+    // Fetch audio features for all seeds
+    await safeFeats(resolved.map(t=>t.id));
+
+    // Shuffle for variety on first listen
+    const shuffled=resolved.sort(()=>Math.random()-0.5);
+    queue=shuffled;
+    qi=0;
+    lastUri=queue[0]?.uri;
+    showScreen("player");draw();
+    elOverlay.style.display="flex";
+  }catch(e){showScreen("error",e.message);}
+}
+
+// ── Discovery — purely weight-driven ─────────────────────
+async function appendNextTracks(){
+  const cur=queue[qi];
+  const inQueue=new Set(queue.map(t=>t.id));
+  const notPlayed=id=>{const lp=playedLog[id];return!lp||(Date.now()-lp.ts)>86400000;};
+
   let pool=[];
-  if(skips>=3){
-    const topE=Object.entries(weights.energy).sort((a,b)=>b[1]-a[1])[0]?.[0];
-    const q=topE==="high"?"chill acoustic calm":topE==="low"?"energetic upbeat dance":"indie alternative";
-    pool=await search(q,8);
+
+  if(skipStreak>=3){
+    // Mood pivot: search genre most opposite to current top weight
+    const topGenre=Object.entries(weights.genre||{}).sort((a,b)=>b[1]-a[1])[0]?.[0];
+    const pivotMap={pop:"classical",classical:"hip-hop","hip-hop":"jazz",jazz:"rock",rock:"electronic",electronic:"country",country:"r&b","r&b":"indie",indie:"latin",latin:"pop"};
+    const pivotGenre=pivotMap[topGenre]||"pop";
+    pool=await searchMany(`genre:${pivotGenre}`,10);
+    pool.forEach(t=>t._genre=pivotGenre);
     skipStreak=0;
   }else{
-    const ids=[...(cur?.artists?.[0]?.id?[cur.artists[0].id]:[]),...topArtists].filter(Boolean).slice(0,4);
-    for(const id of ids)pool.push(...await artistTopTracks(id));
-    if(pool.length<4&&cur?.artists?.[0]?.name)pool.push(...await search(cur.artists[0].name+" similar",6));
+    // Fetch artist genre tags from Spotify to label candidates properly
+    const curArtistId=cur?.artists?.[0]?.id;
+    const topGenre=Object.entries(weights.genre||{}).sort((a,b)=>b[1]-a[1])[0]?.[0];
+    const topEnergy=Object.entries(weights.energy||{}).sort((a,b)=>b[1]-a[1])[0]?.[0];
+
+    // Search by top genre + energy mood for genre-aware discovery
+    if(topGenre){
+      const energyQ=topEnergy==="high"?"energetic":topEnergy==="low"?"calm":"";
+      const candidates=await searchMany(`${energyQ} ${topGenre}`.trim(),10);
+      // Enrich each with genre from their artist
+      for(const t of candidates){
+        const aid=t.artists?.[0]?.id;
+        if(aid){
+          const info=await artistInfo(aid);
+          t._genre=info?.genres?.[0]||topGenre;
+        }else t._genre=topGenre;
+      }
+      pool.push(...candidates);
+    }
+
+    // Also pull from current track's artist for continuity
+    if(curArtistId){
+      const artistTracks=await artistTopTracks(curArtistId);
+      const aid=curArtistId;
+      const info=await artistInfo(aid);
+      const g=info?.genres?.[0]||cur._genre||null;
+      artistTracks.forEach(t=>t._genre=g);
+      pool.push(...artistTracks);
+    }
+
+    // Fill with a cross-genre search if pool is thin
+    if(pool.length<5){
+      const fill=await searchMany("popular",8);
+      fill.forEach(t=>t._genre=null);
+      pool.push(...fill);
+    }
   }
-  // Filter: not already in queue anywhere, not played in 24h
-  const inQueue=new Set(queue.map(t=>t.id));
+
+  // Filter out already-queued or recently played
   pool=pool.filter(t=>t?.id&&t?.uri&&notPlayed(t.id)&&!inQueue.has(t.id));
   pool=[...new Map(pool.map(t=>[t.id,t])).values()];
+
+  // Fetch audio features for scoring
   await safeFeats(pool.map(t=>t.id));
+
+  // Score every candidate against weight vector, pick top 3
   pool.sort((a,b)=>scoreTrack(b)-scoreTrack(a));
-  // Append top 3 to end of queue
   queue.push(...pool.slice(0,3));
+}
+
+// ── Signal recording ──────────────────────────────────────
+// heardMs = actual milliseconds of audio the user listened to
+// Mirrors Synapse's attention model: time-on-content is the core signal
+function recordSignal(track, heardMs, explicit){
+  if(!track)return;
+  const dur=pbState?.duration||track.duration_ms||1;
+  const pct=Math.min(1, heardMs/dur);
+  const a=tAttrs(track);
+
+  let delta;
+  if(explicit==="replay")      delta= 2.5;  // strongest positive: chose to hear again
+  else if(explicit==="rewind") delta= 1.5;  // rewind mid-song
+  else if(explicit==="skip")   delta= pct<0.3?-2.0:pct<0.5?-1.0:-0.3; // skip penalizes by how early
+  else if(pct>=0.90)           delta= 2.0;  // near-complete listen
+  else if(pct>=0.75)           delta= 1.2;
+  else if(pct>=0.50)           delta= 0.3;
+  else if(pct>=0.25)           delta=-0.3;
+  else                         delta=-1.0;  // bailed very early
+
+  adjW(a, delta);
+  playedLog[track.id]={ts:Date.now(), heardMs};
 }
 
 // ── Playback ──────────────────────────────────────────────
@@ -307,27 +510,18 @@ async function playTrack(track){
   try{
     await api(`/me/player/play?device_id=${deviceId}`,{method:"PUT",body:JSON.stringify({uris:[track.uri]})});
     lastUri=track.uri;
+    trackStartPos=Date.now();
     pos=0;
   }catch(e){console.warn("play failed:",e);}
-}
-
-function recordPlay(track,listenedMs){
-  if(!track)return;
-  const dur=track.duration_ms||pbState?.duration||1;
-  const pct=listenedMs/dur;
-  playedLog[track.id]=Date.now();
-  if(pct>=0.75)adjW(tAttrs(track),2);
-  else if(pct>=0.5)adjW(tAttrs(track),0.5);
-  else adjW(tAttrs(track),-0.5);
 }
 
 async function songEnded(){
   if(advancing)return;advancing=true;
   try{
-    recordPlay(queue[qi],pbState?.duration||0); // full listen
+    const heard=Date.now()-trackStartPos;
+    recordSignal(queue[qi], heard, "complete");
     skipStreak=0;
-    // If we're at the end of the queue, append new tracks
-    if(qi>=queue.length-2)await appendNextTracks(queue[qi],0);
+    if(qi>=queue.length-2)await appendNextTracks();
     qi=Math.min(qi+1,queue.length-1);
     await playTrack(queue[qi]);draw();
   }finally{advancing=false;}
@@ -336,10 +530,9 @@ async function songEnded(){
 async function fwd(){
   if(advancing)return;advancing=true;
   try{
-    recordPlay(queue[qi],pos); // partial listen signal
+    recordSignal(queue[qi], pos, "skip");
     skipStreak++;
-    // If moving into uncharted territory, append new tracks first
-    if(qi>=queue.length-2)await appendNextTracks(queue[qi],skipStreak);
+    if(qi>=queue.length-2)await appendNextTracks();
     qi=Math.min(qi+1,queue.length-1);
     scrubHist=[];
     await playTrack(queue[qi]);draw();
@@ -350,13 +543,11 @@ async function rev(){
   if(advancing)return;advancing=true;
   try{
     if(pos<3000){
-      // Go to previous song in queue — qi simply decrements, history preserved
-      adjW(tAttrs(queue[qi]),1); // mild positive for wanting prev
+      recordSignal(queue[qi], pos, "replay");
       if(qi>0)qi--;
       await playTrack(queue[qi]);
     }else{
-      // Rewind current song to start
-      adjW(tAttrs(queue[qi]),1.5);
+      recordSignal(queue[qi], pos, "rewind");
       try{await api("/me/player/seek?position_ms=0",{method:"PUT"});}catch(e){}
       pos=0;
     }
@@ -367,41 +558,51 @@ async function rev(){
 async function togglePlay(){
   if(!sdkPlayer)return;
   try{
+    const s=await sdkPlayer.getCurrentState();
+    if(!s)return;
+    if(s.paused){
+      // If paused >30s, it's a soft-skip signal
+      if(pauseAt&&(Date.now()-pauseAt)>30000){
+        const heardSoFar=pos;
+        recordSignal(queue[qi],heardSoFar,"skip");
+      }
+      pauseAt=null;
+    }else{
+      pauseAt=Date.now();
+    }
     await sdkPlayer.togglePlay();
     setTimeout(async()=>{
-      const s=await sdkPlayer.getCurrentState();
-      if(s){pbState=s;pos=s.position;updatePlayBtn();}
+      const ns=await sdkPlayer.getCurrentState();
+      if(ns){pbState=ns;pos=ns.position;updatePlayBtn();}
     },150);
   }catch(e){console.warn("togglePlay:",e);}
 }
 
-// ── Scrubber — mouse + touch drag ────────────────────────
+// ── Scrubber ──────────────────────────────────────────────
 function onScrubStart(e){
   e.preventDefault();
   isScrubbing=true;
-  const ratio=posFromEvent(e);
-  setPct(ratio);
-  function onMove(ev){
-    ev.preventDefault();
-    const r=posFromEvent(ev);
-    setPct(r);
+  function getR(ev){
+    const rect=elScrubber.getBoundingClientRect();
+    const cx=ev.touches?ev.touches[0].clientX:(ev.changedTouches?ev.changedTouches[0].clientX:ev.clientX);
+    return Math.max(0,Math.min(1,(cx-rect.left)/rect.width));
   }
+  setPct(getR(e));
+  function onMove(ev){ev.preventDefault();setPct(getR(ev));}
   function onEnd(ev){
     ev.preventDefault();
-    const r=posFromEvent(ev.changedTouches?ev:ev);
+    const r=getR(ev);
     const dur=pbState?.duration||0;
-    const newPos=r*dur;
-    const oldPos=pos;
-    const delta=newPos-oldPos;
-    const cur=queue[qi];
-    const now=Date.now();
+    const newPos=r*dur, oldPos=pos, delta=newPos-oldPos;
+    const cur=queue[qi], now=Date.now();
 
-    // Scrub signals
+    // Scrub signals — mirrors Synapse's playhead attention model
     scrubHist=[...scrubHist.filter(x=>now-x.t<5000),{from:oldPos,to:newPos,t:now}];
-    if(scrubHist.filter(x=>Math.abs(x.from-x.to)<dur*0.2).length>=3)adjW(tAttrs(cur),2);
-    if(newPos<2000&&oldPos>5000)adjW(tAttrs(cur),2);
-    else if(delta<0)adjW(tAttrs(cur),0.5);
-    else if(delta>dur*0.4)adjW(tAttrs(cur),-1);
+    const backForth=scrubHist.filter(x=>Math.abs(x.from-x.to)<dur*0.25).length;
+    if(backForth>=3)         adjW(tAttrs(cur), 2.0);   // strong: replaying a section
+    else if(newPos<2000&&oldPos>5000) adjW(tAttrs(cur), 2.0);  // scrubbed back to start
+    else if(delta<0)         adjW(tAttrs(cur), 0.5);   // mild: went backward
+    else if(delta>dur*0.4)   adjW(tAttrs(cur),-1.0);   // skipped large chunk
 
     pos=newPos;
     isScrubbing=false;
@@ -413,28 +614,6 @@ function onScrubStart(e){
   document.addEventListener("touchmove",onMove,{passive:false});
   document.addEventListener("mouseup",function up(ev){onEnd(ev);document.removeEventListener("mousemove",onMove);document.removeEventListener("mouseup",up);},{once:true});
   document.addEventListener("touchend",function up(ev){onEnd(ev);document.removeEventListener("touchmove",onMove);document.removeEventListener("touchend",up);},{once:true,passive:false});
-}
-
-// ── Seed load ─────────────────────────────────────────────
-async function loadSeeds(){
-  showScreen("loading");
-  try{
-    let tracks=[];
-    try{const r=await api("/me/top/tracks?limit=20&time_range=medium_term");tracks=r?.items||[];}catch(e){}
-    try{const r=await api("/me/top/artists?limit=10&time_range=medium_term");topArtists=(r?.items||[]).map(a=>a.id);}catch(e){}
-    if(tracks.length<5){
-      try{const r=await api("/me/tracks?limit=20&market=US");tracks=[...tracks,...(r?.items||[]).map(i=>i.track).filter(Boolean)];}catch(e){}
-    }
-    if(tracks.length<3)tracks=[...tracks,...await search("top hits",10)];
-    tracks=tracks.filter(t=>t?.id&&t?.uri);
-    if(!tracks.length)throw new Error("No playable tracks found. Make sure your Spotify account has some listening history.");
-    await safeFeats(tracks.map(t=>t.id));
-    // Build initial ordered queue — this order is preserved forever
-    queue=[...new Map(tracks.map(t=>[t.id,t])).values()].slice(0,20);
-    qi=0;lastUri=queue[0]?.uri;
-    showScreen("player");draw();
-    elOverlay.style.display="flex";
-  }catch(e){showScreen("error",e.message);}
 }
 
 // ── SDK ───────────────────────────────────────────────────
@@ -449,7 +628,6 @@ function initSDK(){
     sdkPlayer.addListener("not_ready",()=>{deviceId=null;});
     sdkPlayer.addListener("player_state_changed",s=>{
       if(!s||isScrubbing)return;
-      // Detect natural end: paused at 0, previous tracks contains our last uri
       const prev=s.track_window?.previous_tracks||[];
       if(!advancing&&s.paused&&s.position===0&&prev.some(t=>t.uri===lastUri)&&s.track_window?.current_track?.uri!==lastUri){
         songEnded();return;
@@ -459,15 +637,11 @@ function initSDK(){
     });
     sdkPlayer.addListener("account_error",()=>showScreen("error","Spotify Premium is required for in-browser playback."));
     sdkPlayer.addListener("authentication_error",()=>showScreen("error","Authentication failed. Please reconnect."));
-    sdkPlayer.addListener("initialization_error",({message})=>showScreen("error","Player could not start: "+message));
+    sdkPlayer.addListener("initialization_error",({m})=>showScreen("error","Player could not start: "+(m||"")));
     sdkPlayer.connect();
-
     setInterval(async()=>{
       if(!sdkPlayer||elOverlay.style.display!=="none"||isScrubbing)return;
-      try{
-        const s=await sdkPlayer.getCurrentState();
-        if(s){pbState=s;pos=s.position;updateProgress();updatePlayBtn();}
-      }catch(e){}
+      try{const s=await sdkPlayer.getCurrentState();if(s){pbState=s;pos=s.position;updateProgress();updatePlayBtn();}}catch(e){}
     },500);
   };
   const s=document.createElement("script");s.src="https://sdk.scdn.co/spotify-player.js";s.async=true;document.body.appendChild(s);
@@ -479,7 +653,6 @@ document.getElementById("btn-reconnect").addEventListener("click",doLogin);
 document.getElementById("btn-rev").addEventListener("click",rev);
 document.getElementById("btn-fwd").addEventListener("click",fwd);
 document.getElementById("play-btn").addEventListener("click",togglePlay);
-// Scrubber: support both click and drag on mouse + touch
 elScrubber.addEventListener("mousedown",onScrubStart);
 elScrubber.addEventListener("touchstart",onScrubStart,{passive:false});
 document.getElementById("btn-start").addEventListener("click",async()=>{

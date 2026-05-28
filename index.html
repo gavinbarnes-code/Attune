@@ -222,7 +222,9 @@ function updateProgress(){
   elFill.style.width=pct.toFixed(2)+"%";
   elThumb.style.left=pct.toFixed(2)+"%";
   elTPos.textContent=fmt(pos);
-  elTDur.textContent=fmt(dur);
+  // Count down remaining time
+  const remaining=Math.max(0,dur-pos);
+  elTDur.textContent="-"+fmt(remaining);
 }
 function updatePlayBtn(){elPlayBtn.textContent=(pbState?.paused??true)?"▶":"⏸";}
 function updateTrackInfo(){
@@ -251,7 +253,10 @@ function draw(){updateTrackInfo();updateProgress();updatePlayBtn();updateTaste()
 function setPct(r){
   elFill.style.width=(r*100).toFixed(2)+"%";
   elThumb.style.left=(r*100).toFixed(2)+"%";
-  elTPos.textContent=fmt(r*(pbState?.duration||0));
+      const dur=pbState?.duration||0;
+    const remaining=Math.max(0,dur-r*dur);
+    elTPos.textContent=fmt(r*dur);
+    elTDur.textContent="-"+fmt(remaining);
 }
 
 // ── Spotify API ───────────────────────────────────────────
@@ -416,7 +421,7 @@ async function playTrack(track){
     await api(`/me/player/play?device_id=${deviceId}`,{method:"PUT",body:JSON.stringify({uris:[track.uri]})});
     lastUri=track.uri;
     trackStartMs=Date.now();
-    pos=0;
+    pos=0;lastPos=0;lastDur=0;
     saveQueue(); // persist current position in queue
   }catch(e){console.warn("play failed:",e);}
 }
@@ -519,11 +524,25 @@ function onScrubStart(e){
 
 // ── SDK ───────────────────────────────────────────────────
 // Song-end detection strategy:
-// We pass a single URI per playTrack() call so Spotify has no built-in
-// queue. When the track ends, the SDK fires player_state_changed with
-// paused=true, position=0, and our track moves to previous_tracks.
-// We detect this combination and call songEnded() ourselves.
+// Spotify loops a single-URI context back to position 0 when it ends,
+// keeping the same track URI. We detect this by tracking the last known
+// position. When position jumps backward to near 0 from a high value
+// (>80% through), that's a natural end. We also catch it in the poll.
 let endDetected=false;
+let lastPos=0;        // last known position in ms
+let lastDur=0;        // last known duration in ms
+
+function checkForEnd(s){
+  if(advancing||endDetected||isScrubbing)return;
+  const curUri=s.track_window?.current_track?.uri;
+  if(curUri!==lastUri)return; // different track, not our end
+  const dur=s.duration||lastDur||0;
+  // End detected: was near the end (>80%) and position reset to near 0
+  if(dur>0&&lastPos>dur*0.80&&s.position<2000&&s.paused){
+    endDetected=true;
+    songEnded().finally(()=>{endDetected=false;});
+  }
+}
 
 function initSDK(){
   window.onSpotifyWebPlaybackSDKReady=()=>{
@@ -539,14 +558,10 @@ function initSDK(){
     sdkPlayer.addListener("not_ready",()=>{deviceId=null;});
     sdkPlayer.addListener("player_state_changed",s=>{
       if(!s||isScrubbing)return;
-      const prev=s.track_window?.previous_tracks||[];
-      const curUri=s.track_window?.current_track?.uri;
-      // Natural end: SDK paused at 0, our track is in previous, URI changed
-      if(!advancing&&!endDetected&&s.paused&&s.position===0&&curUri!==lastUri&&prev.some(t=>t.uri===lastUri)){
-        endDetected=true;
-        songEnded().finally(()=>{endDetected=false;});
-        return;
-      }
+      checkForEnd(s);
+      if(endDetected)return;
+      lastPos=s.position;
+      lastDur=s.duration||lastDur;
       pbState=s;pos=s.position;
       updateProgress();updatePlayBtn();
     });
@@ -555,18 +570,16 @@ function initSDK(){
     sdkPlayer.addListener("initialization_error",({message})=>showScreen("error","Player could not start: "+(message||"")));
     sdkPlayer.connect();
 
-    // Poll every 500ms — secondary position tracking + end-of-song safety net
+    // Poll every 500ms — position tracking + end-of-song safety net
     setInterval(async()=>{
       if(!sdkPlayer||elOverlay.style.display!=="none"||isScrubbing)return;
       try{
         const s=await sdkPlayer.getCurrentState();
         if(!s)return;
-        // Safety net: if paused at position 0 and near end was detected via duration
-        if(!advancing&&!endDetected&&s.paused&&s.position===0&&lastUri&&s.track_window?.current_track?.uri!==lastUri){
-          endDetected=true;
-          songEnded().finally(()=>{endDetected=false;});
-          return;
-        }
+        checkForEnd(s);
+        if(endDetected)return;
+        lastPos=s.position;
+        lastDur=s.duration||lastDur;
         pbState=s;pos=s.position;
         updateProgress();updatePlayBtn();
       }catch(e){}

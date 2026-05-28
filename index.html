@@ -241,11 +241,40 @@ function updatePlayBtn(){
   document.getElementById("icon-pause").style.display=paused?"none":"block";
 }
 
-// ── Media key support (MacBook keyboard) ──────────────────
+// ── Media key support (macOS / iOS) ──────────────────────
+// The Spotify Web Playback SDK handles audio itself, so the browser
+// doesn't know a song is playing and never activates mediaSession.
+// Fix: play a looping silent <audio> element so the browser thinks
+// it owns active audio — this keeps mediaSession alive and lets
+// hardware keys (F7/F8/F9, headphone buttons, lock screen) fire.
+const silentAudio=(()=>{
+  const a=document.createElement("audio");
+  a.src="data:audio/wav;base64,UklGRiQAAABXQVZFZm10IBAAAA"+
+        "EAAQAAgD4AAABAAAIAEAAA"+
+        "BAAAAAAAAAAGRhdGEAAAAA"; // ~0.1s silent WAV
+  a.loop=true;
+  a.volume=0.001;
+  return a;
+})();
+
+function activateMediaSession(){
+  silentAudio.play().catch(()=>{});
+  navigator.mediaSession.playbackState="playing";
+}
+function deactivateMediaSession(){
+  navigator.mediaSession.playbackState="paused";
+}
+
 navigator.mediaSession.setActionHandler("play",()=>togglePlay());
 navigator.mediaSession.setActionHandler("pause",()=>togglePlay());
 navigator.mediaSession.setActionHandler("previoustrack",()=>rev());
 navigator.mediaSession.setActionHandler("nexttrack",()=>fwd());
+navigator.mediaSession.setActionHandler("seekto",(d)=>{
+  if(!pbState?.duration)return;
+  const newPos=d.seekTime*1000;
+  pos=newPos;
+  api(`/me/player/seek?position_ms=${Math.floor(newPos)}`,{method:"PUT"}).catch(()=>{});
+});
 function updateTrackInfo(){
   const cur=queue[qi];if(!cur)return;
   if(cur.id!==currentTrackId){
@@ -255,13 +284,21 @@ function updateTrackInfo(){
     elTitle.textContent=cur.name||"—";
     elTitle.title=cur.name||"";
     elSub.textContent=(cur.artists?.map(a=>a.name).join(", ")||"Unknown")+(cur.album?.name?" · "+cur.album.name:"");
-    // Update macOS Now Playing widget
+    // Update macOS / iOS Now Playing widget
     navigator.mediaSession.metadata=new MediaMetadata({
       title:cur.name||"",
       artist:cur.artists?.map(a=>a.name).join(", ")||"",
       album:cur.album?.name||"",
       artwork:art?[{src:art,sizes:"300x300",type:"image/jpeg"}]:[],
     });
+    // Sync position state so lock screen scrubber is accurate
+    if(pbState?.duration){
+      navigator.mediaSession.setPositionState({
+        duration:pbState.duration/1000,
+        playbackRate:1,
+        position:pos/1000,
+      });
+    }
   }
 }
 function updateTaste(){
@@ -508,8 +545,10 @@ async function togglePlay(){
     if(s.paused){
       if(pauseAt&&(Date.now()-pauseAt)>30000)recordSignal(queue[qi],pos,"skip");
       pauseAt=null;
+      activateMediaSession();
     }else{
       pauseAt=Date.now();
+      deactivateMediaSession();
     }
     await sdkPlayer.togglePlay();
     setTimeout(async()=>{const ns=await sdkPlayer.getCurrentState();if(ns){pbState=ns;pos=ns.position;updatePlayBtn();}},150);

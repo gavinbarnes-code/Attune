@@ -20,10 +20,12 @@
     #scrubber-thumb{position:absolute;top:50%;transform:translate(-50%,-50%);width:14px;height:14px;border-radius:50%;background:#fff;box-shadow:0 0 4px rgba(0,0,0,.4);pointer-events:none;left:0%}
     .scrubber-times{display:flex;justify-content:space-between;font-size:12px;opacity:.5}
     .controls{display:flex;align-items:center;justify-content:center;gap:32px}
-    .ctrl-btn{background:none;border:none;cursor:pointer;color:#fff;font-size:28px;opacity:.85;padding:8px;line-height:1}
+    .ctrl-btn{background:none;border:none;cursor:pointer;color:#fff;opacity:.85;padding:8px;line-height:1;display:flex;align-items:center;justify-content:center}
     .ctrl-btn:hover{opacity:1}
-    #play-btn{background:#1DB954;border:none;cursor:pointer;width:64px;height:64px;border-radius:50%;font-size:22px;display:flex;align-items:center;justify-content:center;color:#000;flex-shrink:0}
+    .ctrl-btn svg{width:32px;height:32px;fill:currentColor}
+    #play-btn{background:#1DB954;border:none;cursor:pointer;width:64px;height:64px;border-radius:50%;display:flex;align-items:center;justify-content:center;color:#000;flex-shrink:0}
     #play-btn:hover{background:#1ed760}
+    #play-btn svg{width:28px;height:28px;fill:currentColor}
     #taste-section{margin-top:1.5rem;padding-top:1.5rem;border-top:0.5px solid rgba(255,255,255,0.1);display:none}
     .taste-label{font-size:11px;opacity:.4;margin-bottom:8px;text-transform:uppercase;letter-spacing:1px}
     #taste-tags{display:flex;gap:8px;flex-wrap:wrap}
@@ -75,9 +77,16 @@
       </div>
     </div>
     <div class="controls">
-      <button class="ctrl-btn" id="btn-rev" aria-label="Previous or rewind">⏮</button>
-      <button id="play-btn" aria-label="Play">▶</button>
-      <button class="ctrl-btn" id="btn-fwd" aria-label="Skip">⏭</button>
+      <button class="ctrl-btn" id="btn-rev" aria-label="Previous or rewind">
+        <svg viewBox="0 0 24 24" xmlns="http://www.w3.org/2000/svg"><path d="M6 6h2v12H6zm3.5 6 8.5 6V6z"/></svg>
+      </button>
+      <button id="play-btn" aria-label="Play">
+        <svg id="icon-play" viewBox="0 0 24 24"><path d="M8 5v14l11-7z"/></svg>
+        <svg id="icon-pause" viewBox="0 0 24 24" style="display:none"><path d="M6 19h4V5H6v14zm8-14v14h4V5h-4z"/></svg>
+      </button>
+      <button class="ctrl-btn" id="btn-fwd" aria-label="Skip">
+        <svg viewBox="0 0 24 24" xmlns="http://www.w3.org/2000/svg"><path d="M6 18l8.5-6L6 6v12zm2-8.14L11.03 12 8 14.14V9.86zM16 6h2v12h-2z"/></svg>
+      </button>
     </div>
     <div id="taste-section">
       <div class="taste-label">Learning your taste</div>
@@ -226,7 +235,17 @@ function updateProgress(){
   const remaining=Math.max(0,dur-pos);
   elTDur.textContent="-"+fmt(remaining);
 }
-function updatePlayBtn(){elPlayBtn.textContent=(pbState?.paused??true)?"▶":"⏸";}
+function updatePlayBtn(){
+  const paused=pbState?.paused??true;
+  document.getElementById("icon-play").style.display=paused?"block":"none";
+  document.getElementById("icon-pause").style.display=paused?"none":"block";
+}
+
+// ── Media key support (MacBook keyboard) ──────────────────
+navigator.mediaSession.setActionHandler("play",()=>togglePlay());
+navigator.mediaSession.setActionHandler("pause",()=>togglePlay());
+navigator.mediaSession.setActionHandler("previoustrack",()=>rev());
+navigator.mediaSession.setActionHandler("nexttrack",()=>fwd());
 function updateTrackInfo(){
   const cur=queue[qi];if(!cur)return;
   if(cur.id!==currentTrackId){
@@ -236,6 +255,13 @@ function updateTrackInfo(){
     elTitle.textContent=cur.name||"—";
     elTitle.title=cur.name||"";
     elSub.textContent=(cur.artists?.map(a=>a.name).join(", ")||"Unknown")+(cur.album?.name?" · "+cur.album.name:"");
+    // Update macOS Now Playing widget
+    navigator.mediaSession.metadata=new MediaMetadata({
+      title:cur.name||"",
+      artist:cur.artists?.map(a=>a.name).join(", ")||"",
+      album:cur.album?.name||"",
+      artwork:art?[{src:art,sizes:"300x300",type:"image/jpeg"}]:[],
+    });
   }
 }
 function updateTaste(){
